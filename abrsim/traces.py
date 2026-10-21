@@ -1,0 +1,44 @@
+"""Network bandwidth traces.
+
+A trace file is plain text, one sample per line: ``<time_s> <bandwidth_Mbps>`` (the "cooked" format
+used by Pensieve for the FCC and Norway HSDPA datasets).
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+
+@dataclass
+class Trace:
+    name: str
+    times: np.ndarray     # seconds, increasing
+    bw_mbps: np.ndarray   # bandwidth at each timestamp
+
+    def __len__(self):
+        return len(self.times)
+
+
+def load_trace(path):
+    data = np.loadtxt(path, ndmin=2)
+    return Trace(Path(path).name, data[:, 0].astype(float), data[:, 1].astype(float))
+
+
+def load_traces(trace_dir):
+    paths = sorted(p for p in Path(trace_dir).iterdir() if p.is_file() and not p.name.startswith("."))
+    if not paths:
+        raise FileNotFoundError(f"no trace files in {trace_dir}")
+    return [load_trace(p) for p in paths]
+
+
+def synthetic_trace(duration_s=600, seed=0, low=0.2, high=6.0, volatility=0.25, name=None):
+    """Random walk in log-bandwidth space, 1 s granularity. Used for tests until real traces are added."""
+    rng = np.random.default_rng(seed)
+    log_low, log_high = np.log(low), np.log(high)
+    x = rng.uniform(log_low, log_high)
+    bw = np.empty(duration_s)
+    for i in range(duration_s):
+        x = np.clip(x + rng.normal(0.0, volatility), log_low, log_high)
+        bw[i] = np.exp(x)
+    return Trace(name or f"synthetic_{seed}", np.arange(duration_s, dtype=float), bw)
