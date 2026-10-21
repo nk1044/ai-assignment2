@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 TRACE_ROOT = Path(__file__).resolve().parent.parent / "data" / "traces"
+NON_TRACE_SUFFIXES = {".json", ".md"}      # metadata / notes living next to trace files
 
 
 @dataclass
@@ -28,7 +29,8 @@ def load_trace(path):
 
 
 def load_traces(trace_dir):
-    paths = sorted(p for p in Path(trace_dir).iterdir() if p.is_file() and not p.name.startswith("."))
+    paths = sorted(p for p in Path(trace_dir).iterdir()
+                   if p.is_file() and not p.name.startswith(".") and p.suffix not in NON_TRACE_SUFFIXES)
     if not paths:
         raise FileNotFoundError(f"no trace files in {trace_dir}")
     return [load_trace(p) for p in paths]

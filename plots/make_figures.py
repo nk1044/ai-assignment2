@@ -52,7 +52,7 @@ def load_results(result_dir):
 
 def save(fig, out_dir, name):
     fig.savefig(out_dir / f"{name}.png")
-    fig.savefig(out_dir / f"{name}.pdf")
+    fig.savefig(out_dir / f"{name}.pdf", metadata={"CreationDate": None})
     plt.close(fig)
     print(f"  wrote {name}.png/.pdf")
 
@@ -239,6 +239,49 @@ def fig_traces(out_dir):
     save(fig, out_dir, "data_traces")
 
 
+# --------------------------------------------------------------------------- scenarios (U4)
+SCENARIO_TITLES = {"metro_tunnel": "Metro tunnel", "stadium_crowd": "Stadium crowd",
+                   "highway_handover": "Highway handover", "flaky_wifi": "Flaky Wi-Fi", "rural_edge": "Rural edge"}
+
+
+def fig_scenarios(res, out_dir, policies=("Oracle", "A2C", "RobustMPC", "BOLA", "RB", "BB")):
+    pols = [p for p in ordered(res) if p in policies]
+    scen = list(SCENARIO_TITLES)
+    traces = {t.name: t for t in load_dataset("scenarios")}
+    fig, axes = plt.subplots(2, len(scen), figsize=(10.5, 4.4), gridspec_kw={"height_ratios": [1, 2.3]})
+    qoe_all = []
+    for j, sc in enumerate(scen):
+        tr = traces[f"{sc}_0"]
+        ax = axes[0, j]
+        ax.fill_between(tr.times, tr.bw_mbps, step="post", color=style.SEQ_BLUE[1], linewidth=0)
+        ax.plot(tr.times, tr.bw_mbps, drawstyle="steps-post", color=style.SEQ_BLUE[4], linewidth=0.8)
+        ax.set_title(SCENARIO_TITLES[sc], fontsize=10)
+        ax.set_ylim(0, 6)
+        ax.set_xticks([])
+        ax.set_yticks([0, 3, 6] if j == 0 else [])
+        if j == 0:
+            ax.set_ylabel("Mbps")
+        ax = axes[1, j]
+        means = [np.mean([t["qoe"] for t in res[p]["traces"] if t["trace"].startswith(sc)]) for p in pols]
+        qoe_all += means
+        y = np.arange(len(pols))[::-1]
+        for yi, p, m in zip(y, pols, means):
+            ax.barh(yi, m, height=0.66, color="none" if p == "Oracle" else color(p), edgecolor=color(p),
+                    hatch="////" if p == "Oracle" else None, linewidth=1.0)
+            ax.text(m if m > 0 else 0, yi, f" {m:.2f}", va="center", fontsize=7, color=INK)
+        ax.axvline(0, color=INK_2, linewidth=0.6)
+        ax.set_yticks(y, [label(p) for p in pols] if j == 0 else [])
+        ax.grid(axis="y", visible=False)
+        ax.set_xlabel("QoE / chunk")
+    lo, hi = min(0, min(qoe_all)), max(qoe_all)
+    for ax in axes[1]:
+        ax.set_xlim(lo - 0.1, hi * 1.35)
+    fig.suptitle("Stress-test scenarios: example bandwidth (top) and mean QoE over 6 variants (bottom)",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    save(fig, out_dir, "g7_scenarios")
+
+
 # --------------------------------------------------------------------------- G1
 def fig_training(run_dir, out_dir, baselines=None):
     log = Path(run_dir) / "log.csv"
@@ -286,6 +329,11 @@ def main():
     for s, res in results.items():
         fig_breakdown(res, s, out)
         fig_tradeoff(res, s, out)
+    scen = load_results(Path(args.results) / "scenarios_lin")
+    if scen:
+        fig_scenarios(scen, out)
+    else:
+        print("  skip g7_scenarios: run `python evaluate.py --traces scenarios --oracle`")
     if "hsdpa/test" in results:
         fig_timeseries(results["hsdpa/test"], "hsdpa/test", out)
         ref = {pol: np.mean([t["qoe"] for t in results["hsdpa/test"][pol]["traces"]])

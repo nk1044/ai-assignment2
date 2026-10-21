@@ -92,3 +92,15 @@ def test_real_datasets_load():
     sizes = load_chunk_sizes()
     assert sizes.shape == (C.A_DIM, C.TOTAL_CHUNKS)
     assert (np.diff(sizes.mean(axis=1)) > 0).all()        # higher quality -> bigger chunks
+
+
+def test_scenarios_and_metadata_are_handled(tmp_path):
+    from abrsim import load_dataset
+    scen = load_dataset("scenarios")
+    assert len(scen) == 30
+    tunnel = next(t for t in scen if t.name == "metro_tunnel_0")
+    assert (tunnel.bw_mbps == 0).any()                       # real outages
+    (tmp_path / "my_trace").write_text("0\t1.0\n1\t2.0\n")
+    (tmp_path / "my_trace.meta.json").write_text("{}")
+    (tmp_path / "README.md").write_text("notes")
+    assert [t.name for t in load_dataset(str(tmp_path))] == ["my_trace"]
