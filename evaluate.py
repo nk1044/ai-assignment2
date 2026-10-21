@@ -4,8 +4,11 @@
     python evaluate.py --traces fcc/test --qoe log    # dataset name or a directory path
     python evaluate.py --traces synthetic
     python evaluate.py --agent A2C=runs/a2c_lin/best.pt     # add trained agent(s) to the comparison
+    python evaluate.py --oracle                              # also run the offline optimal (~1.5 min)
 
-Writes per-chunk logs to ``<out>/<policy>.csv`` and a summary to ``<out>/summary.csv``.
+Test-time simulation is deterministic (every video starts at the beginning of its trace, no delay
+noise — as in Pensieve's test env), so every policy sees exactly the same network. Writes per-chunk logs to ``<out>/<policy>.csv``, per-trace metrics to
+``<out>/<policy>_traces.csv`` and a summary to ``<out>/summary.csv``.
 """
 
 import argparse
@@ -16,10 +19,11 @@ import numpy as np
 
 from abrsim import ABREnv, load_dataset, synthetic_trace
 from abrsim import config as C
-from baselines import all_baselines
+from baselines import OfflineOptimal, all_baselines
 
-LOG_FIELDS = ["trace", "chunk", "bitrate_kbps", "buffer_s", "rebuffer_s", "delay_s", "throughput_mbps",
-              "chunk_size", "reward", "quality", "rebuffer_penalty", "smooth_penalty", "data_penalty"]
+LOG_FIELDS = ["trace", "chunk", "wall_time_s", "trace_time_s", "bitrate_kbps", "buffer_s", "rebuffer_s",
+              "delay_s", "sleep_s", "throughput_mbps", "chunk_size", "reward", "quality", "rebuffer_penalty",
+              "smooth_penalty", "data_penalty"]
 
 
 def run_policy(policy, env, n_traces):
@@ -31,18 +35,21 @@ def run_policy(policy, env, n_traces):
     rows, per_trace = [], []
     for t in range(n_traces):
         policy.reset()
-        state, done, chunk = env.reset(t), False, 0
+        state, done, chunk, wall = env.reset(t), False, 0, 0.0
         infos, rewards = [], []
         while not done:
             action = policy.select(state, env)
             state, reward, done, info = env.step(action)
-            rows.append({k: info.get(k) for k in LOG_FIELDS} | {"chunk": chunk, "reward": reward})
+            wall += info["delay_s"] + info["sleep_s"]
+            rows.append({k: info.get(k) for k in LOG_FIELDS}
+                        | {"chunk": chunk, "reward": reward, "wall_time_s": wall})
             infos.append(info)
             rewards.append(reward)
             chunk += 1
         play, bitrates = infos[1:], [i["bitrate_kbps"] for i in infos]
         rebuf = sum(i["rebuffer_s"] for i in play)
         per_trace.append({
+            "trace": infos[0]["trace"],
             "qoe": float(np.mean(rewards[1:])),
             "bitrate_mbps": float(np.mean(bitrates[1:])) / 1000,
             "rebuffer_s": rebuf,
@@ -55,7 +62,7 @@ def run_policy(policy, env, n_traces):
 
 
 def summarize(name, per_trace):
-    keys = per_trace[0].keys()
+    keys = [k for k in per_trace[0] if k != "trace"]
     out = {"policy": name}
     for k in keys:
         vals = np.array([p[k] for p in per_trace])
@@ -82,6 +89,7 @@ def main():
     p.add_argument("--agent", action="append", default=[], metavar="NAME=CKPT",
                    help="trained agent checkpoint to evaluate (repeatable)")
     p.add_argument("--no-baselines", action="store_true")
+    p.add_argument("--oracle", action="store_true", help="also run the offline-optimal upper bound")
     args = p.parse_args()
 
     if args.traces == "synthetic":
@@ -93,14 +101,18 @@ def main():
 
     summaries = []
     policies = [] if args.no_baselines else all_baselines()
+    if args.oracle:
+        policies.append(OfflineOptimal())
     for spec in args.agent:
         from agents import RLPolicy                      # imported lazily: baselines need no torch
         name, _, path = spec.rpartition("=")
         policies.append(RLPolicy.from_checkpoint(path, name or "A2C"))
     for policy in policies:
-        env = ABREnv(traces, qoe=args.qoe, data_lambda=args.data_lambda, seed=args.seed)
+        env = ABREnv(traces, qoe=args.qoe, data_lambda=args.data_lambda, seed=args.seed, noise=False,
+                     random_start=False)
         rows, per_trace = run_policy(policy, env, len(traces))
         write_csv(out / f"{policy.name}.csv", rows)
+        write_csv(out / f"{policy.name}_traces.csv", per_trace)
         summaries.append(summarize(policy.name, per_trace))
 
     write_csv(out / "summary.csv", summaries)

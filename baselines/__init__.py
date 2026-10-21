@@ -1,6 +1,7 @@
 from .base import ConstantPolicy, Policy, RandomPolicy
 from .heuristics import Bola, BufferBased, RateBased
 from .mpc import MPC
+from .oracle import OfflineOptimal
 
 
 def all_baselines():

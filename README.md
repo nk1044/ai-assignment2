@@ -7,10 +7,11 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python tools/prepare_traces.py   # (only if data/ is missing) fetch real traces + video sizes
 pytest                           # simulator + baseline tests
-python evaluate.py               # all baselines on HSDPA test traces
+python evaluate.py --oracle      # all baselines + offline optimal on HSDPA test traces (~1.5 min)
 python evaluate.py --traces fcc/test --qoe log
 # training (≈1 h, CPU):  python train.py --run-name a2c_lin
-# evaluate a trained agent: python evaluate.py --agent A2C=runs/a2c_lin/best.pt
+# evaluate a trained agent: python evaluate.py --oracle --agent A2C=runs/a2c_lin/best.pt
+python plots/make_figures.py     # report figures → plots/figures/
 ```
 
 **Implementation progress**
@@ -19,7 +20,7 @@ python evaluate.py --traces fcc/test --qoe log
 - [x] Part 2 – Baselines (RB, BB, BOLA, MPC) + evaluation script (`baselines/`, `evaluate.py`)
 - [x] Part 3 – Real traces (FCC, HSDPA) + EnvivioDash3 video sizes (`data/`, `tools/prepare_traces.py`)
 - [x] Part 4 – Actor-critic agent code + training script (`agents/`, `train.py`; training run deferred to the end)
-- [ ] Part 5 – Offline-optimal upper bound + result graphs
+- [x] Part 5 – Offline-optimal upper bound + result graphs (`baselines/oracle.py`, `plots/`)
 - [ ] Part 6 – Stress-test scenarios, explainability, web demo, own Indian traces
 - [ ] Part 7 – Full training runs + final results (last)
 
@@ -41,7 +42,7 @@ python evaluate.py --traces fcc/test --qoe log
 7. [RL Algorithm: Actor-Critic (A2C / A3C)](#7-rl-algorithm-actor-critic-a2c--a3c)
 8. [Baseline Algorithms](#8-baseline-algorithms)
 9. [Evaluation Metrics](#9-evaluation-metrics)
-10. [Planned Experiments and Graphs](#10-planned-experiments-and-graphs)
+10. [Experiments and Graphs](#10-experiments-and-graphs)
 11. [Results](#11-results)
 12. [What Makes This Project Unique (Bonus Plan)](#12-what-makes-this-project-unique-bonus-plan)
 13. [Repository Structure](#13-repository-structure)
@@ -440,7 +441,7 @@ same test traces:
 | **MPC / RobustMPC** (Yin et al. SIGCOMM'15) | Model-predictive control | Predicts throughput for next 5 chunks (RobustMPC discounts by max past prediction error), brute-forces all 6⁵ bitrate sequences and picks the first action of the best sequence. |
 | **DQN** *(RL baseline)* | Value-based RL | Same state/reward, Q-network instead of actor-critic. |
 | **PPO** *(RL baseline)* | Policy-gradient RL | Clipped-surrogate actor-critic. |
-| **Offline Optimal** *(upper bound)* | Oracle | Dynamic programming with full future knowledge of the trace (not achievable in practice — shows how far each method is from ideal). |
+| **Offline Optimal** *(upper bound)* | Oracle | Dynamic programming over the whole video with full knowledge of the future bandwidth. DP state = (last bitrate, buffer level in 0.5 s bins), keeping the best-reward history per state; results change by < 0.01 QoE between 1 s, 0.5 s and 0.25 s bins, so it is effectively optimal. Not achievable in practice — shows how much QoE is left on the table. |
 
 ---
 
@@ -456,9 +457,14 @@ For every test trace we record:
 
 Results are reported as **mean ± std** over all test traces and as **CDFs**.
 
+**Test protocol** (same as Pensieve's test simulator): every video starts at the beginning of its trace and
+there is no delay noise, so the test is fully deterministic and every algorithm faces exactly the same
+network. The first chunk's wait is reported separately as *startup delay*; QoE is averaged over the
+remaining 47 chunks. Training uses random start offsets and ±10 % delay noise.
+
 ---
 
-## 10. Planned Experiments and Graphs
+## 10. Experiments and Graphs
 
 | # | Graph | Purpose |
 |---|---|---|
@@ -479,25 +485,46 @@ Results are reported as **mean ± std** over all test traces and as **CDFs**.
 
 ### 11.1 Baselines on real traces (QoE_lin, per-chunk mean ± std)
 
-Measured with `python evaluate.py` (first chunk reported separately as startup delay, as in Pensieve):
+Measured with `python evaluate.py --oracle` (deterministic test protocol, §9):
 
-| Policy | HSDPA test (142) | FCC test (12) | Avg bitrate HSDPA (Mbps) | Rebuffer HSDPA (s) |
-|---|---|---|---|---|
-| RobustMPC | **0.880** ± 0.65 | **0.008** ± 3.39 | 1.13 | 1.21 |
-| BOLA | 0.764 ± 0.42 | −0.124 ± 3.19 | 0.94 | 0.05 |
-| RB | 0.734 ± 0.57 | −0.304 ± 3.30 | 0.93 | 1.30 |
-| BB | 0.601 ± 0.68 | −0.341 ± 3.40 | 1.14 | 2.03 |
-| FastMPC | 0.351 ± 0.85 | −0.230 ± 3.39 | 1.20 | 7.60 |
-| Fixed 300 kbps | 0.296 ± 0.05 | −0.612 ± 3.02 | 0.30 | 0.05 |
-| Random | −15.56 ± 12.0 | −20.79 ± 26.0 | 1.87 | 174.1 |
+| Policy | HSDPA test (142) | FCC test (12) | Avg bitrate HSDPA (Mbps) | Rebuffer HSDPA (s / video) | Switches HSDPA |
+|---|---|---|---|---|---|
+| *Offline optimal* | *1.145* ± 0.61 | *0.819* ± 1.81 | 1.18 | 0.01 | 2.4 |
+| RobustMPC | **0.907** ± 0.62 | **0.604** ± 1.83 | 1.13 | 0.91 | 9.5 |
+| BOLA | 0.771 ± 0.42 | 0.396 ± 1.66 | 0.94 | 0.01 | 13.8 |
+| RB | 0.745 ± 0.53 | 0.428 ± 1.77 | 0.92 | 1.13 | 6.5 |
+| BB | 0.626 ± 0.66 | 0.344 ± 1.98 | 1.14 | 1.80 | 25.3 |
+| FastMPC | 0.431 ± 0.85 | 0.252 ± 1.91 | 1.20 | 6.82 | 10.6 |
+| Fixed 300 kbps | 0.299 ± 0.01 | −0.140 ± 1.46 | 0.30 | 0.01 | 0.0 |
+| Random | −15.38 ± 11.9 | −19.61 ± 25.9 | 1.87 | 172.1 | 39.1 |
 
-Observations: RobustMPC is the strongest baseline (consistent with the literature); BOLA almost never
-stalls but under-uses bandwidth; BB switches quality very often (≈26 switches per video). FCC test
-traces contain zero-bandwidth outages, which cause unavoidable stalls for every algorithm.
+Observations:
+- RobustMPC is the strongest baseline (consistent with the literature), but still **21 % below the
+  offline optimal** on HSDPA — that gap is the room the RL agent can win.
+- The optimum reaches higher bitrate *and* almost zero stalls with very few switches (2.4 vs 9.5 per
+  video): it builds a large buffer before bandwidth drops (see `g5_timeseries_hsdpa_test`).
+- BOLA almost never stalls but under-uses bandwidth; BB switches quality very often (≈25 per video).
+- FCC test traces contain zero-bandwidth outages — even the optimum stalls ≈ 4.8 s per video there.
 
-### 11.2 Expected RL results (hypotheses, to be replaced after training)
+### 11.2 Figures (generated by `python plots/make_figures.py` → `plots/figures/`, PNG + PDF)
 
-- The RL agent to achieve roughly **10–25 % higher average QoE** than RobustMPC.
+| Figure | File |
+|---|---|
+| Example real traces vs. bitrate ladder | ![](plots/figures/data_traces.png) |
+| G2 – Average QoE per algorithm | ![](plots/figures/g2_qoe_bars.png) |
+| G3 – QoE breakdown (utility / rebuffer / smoothness) | ![](plots/figures/g3_breakdown_hsdpa_test.png) |
+| G4 – CDF of per-trace QoE | ![](plots/figures/g4_qoe_cdf.png) |
+| G5 – One video: bandwidth, decisions, buffer | ![](plots/figures/g5_timeseries_hsdpa_test.png) |
+| G6 – Quality vs. stalls trade-off | ![](plots/figures/g6_tradeoff_hsdpa_test.png) |
+| G1 – Learning curve | *after training (Part 7)* |
+
+The A2C agent is added to every figure automatically once it is evaluated
+(`python evaluate.py --oracle --agent A2C=runs/a2c_lin/best.pt`).
+
+### 11.3 Expected RL results (hypotheses, to be replaced after training)
+
+- The RL agent to close a large part of the 21 % gap between RobustMPC and the offline optimal
+  (Pensieve reports 12–25 % over RobustMPC).
 - Gains mostly come from **reduced rebuffering** — the agent learns to build up buffer when
   bandwidth is good and lower quality early when throughput starts to drop.
 - The RL agent should be within ~10–15 % of the offline optimal.
@@ -580,11 +607,14 @@ ai-assignment-2/
 │   ├── base.py           # policy interface, fixed/random
 │   ├── heuristics.py     # RB, BB, BOLA
 │   ├── mpc.py            # FastMPC / RobustMPC
-│   └── offline_optimal.py
+│   └── oracle.py         # offline optimal (DP with future knowledge)
 ├── train.py              # training loop, validation, checkpoints → runs/<name>/
 ├── evaluate.py           # runs all algorithms on test traces
 ├── explain/              # policy heatmaps, saliency (U3)
-├── plots/                # scripts + generated graphs, learning timelapse GIF (P4)
+├── plots/
+│   ├── style.py          # fixed colour per algorithm, shared figure style
+│   ├── make_figures.py   # all report figures from results/ and runs/
+│   └── figures/          # generated PNG + PDF
 ├── web/                  # side-by-side player, draw-your-network, human-vs-AI (P1–P6)
 ├── tools/
 │   ├── prepare_traces.py # downloads + splits the public traces

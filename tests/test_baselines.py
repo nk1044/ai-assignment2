@@ -51,3 +51,16 @@ def test_mpc_beats_always_highest_on_slow_link():
     _, high = run_policy(ConstantPolicy(C.A_DIM - 1), env, 1)
     assert mpc[0]["qoe"] > high[0]["qoe"]
     assert mpc[0]["rebuffer_s"] < high[0]["rebuffer_s"]
+
+
+def test_oracle_is_an_upper_bound():
+    from baselines import OfflineOptimal
+    from abrsim import load_dataset
+    traces = load_dataset("hsdpa/test")[:3] + [synthetic_trace(seed=9)]
+    results = {}
+    for policy in [OfflineOptimal(buffer_bin=1.0), MPC(), Bola(), BufferBased(), RateBased()]:
+        env = ABREnv(traces, noise=False, random_start=False)
+        _, per_trace = run_policy(policy, env, len(traces))
+        results[policy.name] = np.array([p["total_qoe"] for p in per_trace])
+    for name, qoe in results.items():
+        assert (results["Oracle"] >= qoe - 1e-6).all(), name

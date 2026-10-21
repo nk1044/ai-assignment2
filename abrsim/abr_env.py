@@ -20,7 +20,9 @@ class StreamingSimulator:
         self.traces = traces
         self.chunk_sizes = load_chunk_sizes() if chunk_sizes is None else np.asarray(chunk_sizes)
         self.n_chunks = self.chunk_sizes.shape[1]
+        # separate streams: turning noise on/off must not change which start offsets get sampled
         self.rng = np.random.default_rng(seed)
+        self.noise_rng = np.random.default_rng(None if seed is None else seed + 1_000_003)
         self.random_start = random_start
         self.noise = noise
         self.trace_idx = -1
@@ -33,6 +35,7 @@ class StreamingSimulator:
         self.trace = self.traces[trace_idx]
         self.ptr = int(self.rng.integers(1, len(self.trace))) if self.random_start else 1
         self.last_time = self.trace.times[self.ptr - 1]
+        self.start_time = self.last_time
         self.chunk_idx = 0
         self.buffer_s = 0.0
 
@@ -70,12 +73,18 @@ class StreamingSimulator:
             self.last_time = self.trace.times[self.ptr]
             self._next_ptr()
 
+    def get_state(self):
+        return (self.ptr, self.last_time, self.chunk_idx, self.buffer_s)
+
+    def set_state(self, state):
+        self.ptr, self.last_time, self.chunk_idx, self.buffer_s = state
+
     def download_chunk(self, quality):
         """Download the next chunk at ``quality``; returns a dict describing what happened."""
         size = int(self.chunk_sizes[quality, self.chunk_idx])
         delay = self._download_time(size) + C.LINK_RTT_S
         if self.noise:
-            delay *= self.rng.uniform(C.NOISE_LOW, C.NOISE_HIGH)
+            delay *= self.noise_rng.uniform(C.NOISE_LOW, C.NOISE_HIGH)
 
         rebuffer = max(delay - self.buffer_s, 0.0)
         self.buffer_s = max(self.buffer_s - delay, 0.0) + C.CHUNK_LEN_S
@@ -93,6 +102,7 @@ class StreamingSimulator:
         return {
             "delay_s": delay,
             "sleep_s": sleep,
+            "trace_time_s": self.last_time,
             "rebuffer_s": rebuffer,
             "buffer_s": self.buffer_s,
             "chunk_size": size,
