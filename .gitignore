@@ -225,3 +225,6 @@ __marimo__/
 
 # Generated evaluation outputs
 results/
+
+# Training runs (checkpoints, logs)
+runs/

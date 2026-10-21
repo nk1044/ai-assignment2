@@ -3,6 +3,7 @@
     python evaluate.py                                # HSDPA test traces, all baselines
     python evaluate.py --traces fcc/test --qoe log    # dataset name or a directory path
     python evaluate.py --traces synthetic
+    python evaluate.py --agent A2C=runs/a2c_lin/best.pt     # add trained agent(s) to the comparison
 
 Writes per-chunk logs to ``<out>/<policy>.csv`` and a summary to ``<out>/summary.csv``.
 """
@@ -78,6 +79,9 @@ def main():
     p.add_argument("--data-lambda", type=float, default=0.0)
     p.add_argument("--out", help="output dir (default: results/baselines/<traces>_<qoe>)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--agent", action="append", default=[], metavar="NAME=CKPT",
+                   help="trained agent checkpoint to evaluate (repeatable)")
+    p.add_argument("--no-baselines", action="store_true")
     args = p.parse_args()
 
     if args.traces == "synthetic":
@@ -88,7 +92,12 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     summaries = []
-    for policy in all_baselines():
+    policies = [] if args.no_baselines else all_baselines()
+    for spec in args.agent:
+        from agents import RLPolicy                      # imported lazily: baselines need no torch
+        name, _, path = spec.rpartition("=")
+        policies.append(RLPolicy.from_checkpoint(path, name or "A2C"))
+    for policy in policies:
         env = ABREnv(traces, qoe=args.qoe, data_lambda=args.data_lambda, seed=args.seed)
         rows, per_trace = run_policy(policy, env, len(traces))
         write_csv(out / f"{policy.name}.csv", rows)

@@ -9,6 +9,8 @@ python tools/prepare_traces.py   # (only if data/ is missing) fetch real traces 
 pytest                           # simulator + baseline tests
 python evaluate.py               # all baselines on HSDPA test traces
 python evaluate.py --traces fcc/test --qoe log
+# training (≈1 h, CPU):  python train.py --run-name a2c_lin
+# evaluate a trained agent: python evaluate.py --agent A2C=runs/a2c_lin/best.pt
 ```
 
 **Implementation progress**
@@ -16,7 +18,7 @@ python evaluate.py --traces fcc/test --qoe log
 - [x] Part 1 – Trace-driven streaming simulator + MDP environment (`abrsim/`)
 - [x] Part 2 – Baselines (RB, BB, BOLA, MPC) + evaluation script (`baselines/`, `evaluate.py`)
 - [x] Part 3 – Real traces (FCC, HSDPA) + EnvivioDash3 video sizes (`data/`, `tools/prepare_traces.py`)
-- [ ] Part 4 – Actor-critic agent code (training run is deferred to the end)
+- [x] Part 4 – Actor-critic agent code + training script (`agents/`, `train.py`; training run deferred to the end)
 - [ ] Part 5 – Offline-optimal upper bound + result graphs
 - [ ] Part 6 – Stress-test scenarios, explainability, web demo, own Indian traces
 - [ ] Part 7 – Full training runs + final results (last)
@@ -353,61 +355,76 @@ Actor and critic have the **same structure but separate parameters** (θ and φ)
 
 ### 7.3 Training Objective
 
-**Advantage** (n-step / one-step TD):
+We implement **synchronous A2C**: `N = 16` simulators (the parallel actors of A3C) each stream one full
+video with the current policy, then a single batched update is made (`agents/a2c.py`). This gives
+the same decorrelated experience as A3C, but is deterministic and easier to debug.
+
+**Advantage — Generalized Advantage Estimation (GAE):**
 
 ```
-A(s_t, a_t) = r_t + γ V_φ(s_{t+1}) − V_φ(s_t)
+δ_t = r_t + γ V_φ(s_{t+1}) − V_φ(s_t)            (one-step TD error; V = 0 after the last chunk)
+A_t = Σ_k (γλ)^k δ_{t+k}                          (λ = 0.95; λ = 0 → one-step TD, λ = 1 → Monte-Carlo)
+G_t = A_t + V_φ(s_t)                              (critic target)
 ```
+
+Advantages are normalized to zero mean / unit variance per batch.
 
 **Actor (policy gradient) update with entropy regularization:**
 
 ```
-θ ← θ + α_θ Σ_t ∇_θ log π_θ(a_t | s_t) · A(s_t, a_t)  +  β ∇_θ H(π_θ(· | s_t))
+L_actor(θ) = − mean_t [ log π_θ(a_t | s_t) · A_t ]  −  β · mean_t H(π_θ(· | s_t))
 ```
 
 **Critic (value regression) update:**
 
 ```
-φ ← φ − α_φ Σ_t ∇_φ ( r_t + γ V_φ(s_{t+1}) − V_φ(s_t) )²
+L_critic(φ) = mean_t ( G_t − V_φ(s_t) )²
 ```
 
 - `H(π) = −Σ_a π(a|s) log π(a|s)` is the **entropy** bonus — encourages exploration early on.
-  `β` is decayed from ~1 → ~0.1 (or lower) over training so the policy becomes more decisive.
+  `β` is decayed linearly from 1.0 → 0.05 over the first 20k updates so the policy becomes decisive.
+- Gradients are clipped to norm 5.
 
-### 7.4 Hyperparameters (initial)
+### 7.4 Hyperparameters
 
 | Hyperparameter | Value |
 |---|---|
-| Actor learning rate `α_θ` | 1e-4 |
-| Critic learning rate `α_φ` | 1e-3 |
+| Actor learning rate `α_θ` | 1e-4 (Adam) |
+| Critic learning rate `α_φ` | 1e-3 (Adam) |
 | Discount `γ` | 0.99 |
-| Entropy weight `β` | 1.0 → 0.1 (decay) |
-| Parallel workers (A3C) | 8–16 |
-| Rollout length per update | 100 steps (or end of video) |
-| Optimizer | Adam / RMSProp |
-| Training epochs | ~50k–100k updates (until test QoE plateaus) |
+| GAE `λ` | 0.95 |
+| Entropy weight `β` | 1.0 → 0.05 (linear over 20k updates) |
+| Parallel environments | 16 |
+| Batch per update | 16 videos × 48 chunks = 768 transitions |
+| Gradient clip | 5.0 |
+| Training length | 30k updates (≈ 23M chunks, ≈ 1.1 h on a laptop CPU at ~135 ms/update) |
+| Validation | greedy policy on 10 % of training traces (held out), every 250 updates |
+
+All are command-line flags of `train.py`.
 
 ### 7.5 Training Loop (pseudo-code)
 
 ```
+split training traces → 90 % train, 10 % validation
 initialize actor θ, critic φ
-for each worker in parallel:
-    loop:
-        trace ← random training trace; s ← env.reset(trace)
-        while not done:
-            a ~ π_θ(·|s)
-            s', r, done ← env.step(a)
-            store (s, a, r, s')
-            s ← s'
-        compute advantages with critic
-        send gradients to central learner → update θ, φ
-        pull latest parameters
-periodically: evaluate greedy policy (argmax π) on test traces, save best model
+for iteration = 1 … 30k:
+    for each of 16 envs: pick a random train trace + random start offset
+    stream one full video in every env with a ~ π_θ(·|s)          (rollout, 48 × 16)
+    compute GAE advantages A_t and returns G_t with the critic
+    one Adam step on L_actor (θ) and on L_critic (φ); decay β
+    every 1000 iters: save checkpoint (used for the "watch it learn" timelapse)
+    every 250 iters: evaluate greedy policy on validation traces → keep best.pt
+final: evaluate best.pt once on the untouched test traces (evaluate.py --agent)
 ```
 
 At **test time** the agent picks `a = argmax_a π_θ(a|s)` (deterministic).
 
----
+### 7.6 Data-Saver Conditioning (U2)
+
+With `--lambda-range lo hi`, every training video samples a data-cost weight `λ ~ U(lo, hi)`; the reward
+gets `− λ · chunk_size_MB` and `λ` is fed to both networks as an extra input (a Dense branch merged into
+the feature layer). One trained agent then covers the whole "max quality ↔ data saver" range, selected
+at run time by a slider.
 
 ## 8. Baseline Algorithms
 
@@ -555,15 +572,16 @@ ai-assignment-2/
 │   ├── traces.py         # trace loading (dataset names), synthetic traces
 │   └── video.py          # chunk-size table
 ├── agents/
-│   ├── actor_critic.py   # A2C/A3C model + training
-│   ├── ppo.py            # PPO comparison (optional)
-│   └── dqn.py            # DQN comparison (optional)
+│   ├── networks.py       # actor / critic (Conv1D + Dense feature extractor)
+│   ├── a2c.py            # A2C update (GAE, entropy decay), checkpoints
+│   ├── rollout.py        # 16 parallel simulators, lambda conditioning
+│   └── policy.py         # wraps a checkpoint as an evaluate.py policy
 ├── baselines/
 │   ├── base.py           # policy interface, fixed/random
 │   ├── heuristics.py     # RB, BB, BOLA
 │   ├── mpc.py            # FastMPC / RobustMPC
 │   └── offline_optimal.py
-├── train.py
+├── train.py              # training loop, validation, checkpoints → runs/<name>/
 ├── evaluate.py           # runs all algorithms on test traces
 ├── explain/              # policy heatmaps, saliency (U3)
 ├── plots/                # scripts + generated graphs, learning timelapse GIF (P4)
