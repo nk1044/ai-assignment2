@@ -5,13 +5,14 @@
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                      # simulator tests
+pytest                      # simulator + baseline tests
+python evaluate.py          # run all baselines (synthetic traces until real ones are added)
 ```
 
 **Implementation progress**
 
 - [x] Part 1 – Trace-driven streaming simulator + MDP environment (`abrsim/`)
-- [ ] Part 2 – Baselines (RB, BB, BOLA, MPC) + evaluation script
+- [x] Part 2 – Baselines (RB, BB, BOLA, MPC) + evaluation script (`baselines/`, `evaluate.py`)
 - [ ] Part 3 – Real traces (FCC, HSDPA) download & preprocessing
 - [ ] Part 4 – Actor-critic agent + training
 - [ ] Part 5 – Graphs, explainability, web demo, own traces
