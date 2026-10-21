@@ -1,8 +1,9 @@
 """Video chunk-size table.
 
-Real ABR work uses per-chunk sizes of an encoded test video (e.g. EnvivioDash3). Until we drop such a
-table into ``data/video/``, we generate a synthetic VBR (variable bitrate) table: every chunk has a
-"scene complexity" factor shared by all quality levels, so a complex scene is large at every bitrate.
+By default we use the real per-chunk sizes of the EnvivioDash3 test video (``data/video/envivio``,
+fetched by ``tools/prepare_traces.py``). If that is missing we fall back to a synthetic VBR table: every
+chunk has a "scene complexity" factor shared by all quality levels, so a complex scene is large at every
+bitrate.
 """
 
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 import numpy as np
 
 from .config import BITRATES_KBPS, CHUNK_LEN_S, TOTAL_CHUNKS
+
+DEFAULT_VIDEO_DIR = Path(__file__).resolve().parent.parent / "data" / "video" / "envivio"
 
 
 def synthetic_chunk_sizes(n_chunks=TOTAL_CHUNKS, seed=42, complexity_sigma=0.15, level_sigma=0.05):
@@ -22,10 +25,10 @@ def synthetic_chunk_sizes(n_chunks=TOTAL_CHUNKS, seed=42, complexity_sigma=0.15,
     return (nominal * complexity[None, :] * level_noise).astype(np.int64)
 
 
-def load_chunk_sizes(video_dir=None):
+def load_chunk_sizes(video_dir=DEFAULT_VIDEO_DIR, n_chunks=TOTAL_CHUNKS):
     """Load ``video_size_<level>`` files (one size in bytes per line) or fall back to synthetic sizes."""
     if video_dir is not None:
         files = [Path(video_dir) / f"video_size_{i}" for i in range(len(BITRATES_KBPS))]
         if all(f.exists() for f in files):
-            return np.array([np.loadtxt(f, dtype=np.int64) for f in files])
-    return synthetic_chunk_sizes()
+            return np.array([np.loadtxt(f, dtype=np.int64)[:n_chunks] for f in files])
+    return synthetic_chunk_sizes(n_chunks)

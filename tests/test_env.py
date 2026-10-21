@@ -81,3 +81,14 @@ def test_trace_wraps_around_when_video_is_longer():
     env = ABREnv([constant_trace(0.5, duration_s=30)], noise=False, random_start=False)
     _, infos = run_episode(env, lambda s: 0)
     assert len(infos) == C.TOTAL_CHUNKS
+
+
+def test_real_datasets_load():
+    from abrsim import load_dataset, load_chunk_sizes
+    assert len(load_dataset("hsdpa/test")) == 142
+    assert len(load_dataset("fcc/train+hsdpa/train")) == 47 + 68
+    train = load_dataset("train")
+    assert all(t.name.split("/")[0] in ("fcc", "hsdpa") for t in train)
+    sizes = load_chunk_sizes()
+    assert sizes.shape == (C.A_DIM, C.TOTAL_CHUNKS)
+    assert (np.diff(sizes.mean(axis=1)) > 0).all()        # higher quality -> bigger chunks

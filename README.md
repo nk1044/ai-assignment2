@@ -5,17 +5,21 @@
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                      # simulator + baseline tests
-python evaluate.py          # run all baselines (synthetic traces until real ones are added)
+python tools/prepare_traces.py   # (only if data/ is missing) fetch real traces + video sizes
+pytest                           # simulator + baseline tests
+python evaluate.py               # all baselines on HSDPA test traces
+python evaluate.py --traces fcc/test --qoe log
 ```
 
 **Implementation progress**
 
 - [x] Part 1 – Trace-driven streaming simulator + MDP environment (`abrsim/`)
 - [x] Part 2 – Baselines (RB, BB, BOLA, MPC) + evaluation script (`baselines/`, `evaluate.py`)
-- [ ] Part 3 – Real traces (FCC, HSDPA) download & preprocessing
-- [ ] Part 4 – Actor-critic agent + training
-- [ ] Part 5 – Graphs, explainability, web demo, own traces
+- [x] Part 3 – Real traces (FCC, HSDPA) + EnvivioDash3 video sizes (`data/`, `tools/prepare_traces.py`)
+- [ ] Part 4 – Actor-critic agent code (training run is deferred to the end)
+- [ ] Part 5 – Offline-optimal upper bound + result graphs
+- [ ] Part 6 – Stress-test scenarios, explainability, web demo, own Indian traces
+- [ ] Part 7 – Full training runs + final results (last)
 
 ---
 
@@ -36,9 +40,9 @@ python evaluate.py          # run all baselines (synthetic traces until real one
 8. [Baseline Algorithms](#8-baseline-algorithms)
 9. [Evaluation Metrics](#9-evaluation-metrics)
 10. [Planned Experiments and Graphs](#10-planned-experiments-and-graphs)
-11. [Expected Results](#11-expected-results)
+11. [Results](#11-results)
 12. [What Makes This Project Unique (Bonus Plan)](#12-what-makes-this-project-unique-bonus-plan)
-13. [Planned Repository Structure](#13-planned-repository-structure)
+13. [Repository Structure](#13-repository-structure)
 14. [Assumptions and Limitations](#14-assumptions-and-limitations)
 15. [References](#15-references)
 
@@ -294,19 +298,23 @@ Training on a real video player is too slow (one video = several minutes of real
 
 ## 6. Network Traces (Data)
 
-We train and test on **real-world bandwidth traces** (publicly available):
+We train and test on **real-world bandwidth traces** (publicly available, pre-processed versions released
+with Pensieve; see [data/README.md](data/README.md)):
 
-| Dataset | Description | Typical bandwidth |
-|---|---|---|
-| **FCC** (US Federal Communications Commission, Measuring Broadband America) | Broadband / home Internet throughput logs | 0.2 – 6 Mbps (filtered) |
-| **Norway HSDPA 3G** (Riiser et al., 2013) | Mobile 3G throughput recorded on buses, trains, ferries, cars in Oslo | 0.2 – 6 Mbps, highly variable |
-| *(optional)* **Oboe / Puffer / 4G-LTE / 5G traces** | Newer traces for generalization testing | varies |
+| Dataset | Description | Train | Test | Mean bandwidth per trace |
+|---|---|---|---|---|
+| **FCC** (US Federal Communications Commission, Measuring Broadband America) | Broadband / home Internet throughput logs | 47 | 12 | 0.19 – 2.92 Mbps |
+| **Norway HSDPA 3G** (Riiser et al., 2013) | Mobile 3G throughput recorded on buses, trains, ferries, metro, trams in Oslo | 68 | 142 | 0.13 – 4.59 Mbps |
+| *(Part 6)* **Our own Indian 4G/5G traces** | Recorded on our phones during commutes (U1) | – | all | – |
 
-- Traces are pre-processed into `(time_s, bandwidth_Mbps)` pairs at 1-second granularity.
-- Traces with average bandwidth > 6 Mbps are filtered out (otherwise every algorithm simply picks
-  the max bitrate and the comparison is meaningless) and very low traces (< 0.2 Mbps) are removed.
-- **Split:** ~80 % training traces / ~20 % test traces (no overlap). We also test on an
-  *unseen* dataset (e.g. train on FCC, test on HSDPA) to measure generalization.
+- Each trace is a list of `(time_s, bandwidth_Mbps)` samples (~1 s apart).
+- The traces were already filtered by the Pensieve authors to the range where bitrate choice matters
+  (otherwise every algorithm simply picks the max bitrate and the comparison is meaningless).
+- **Split:** HSDPA train/test as released (verified: no overlapping traces). FCC has no official test
+  split, so we hold out 20 % (seed 0). Default training set = FCC train + HSDPA train (115 traces).
+  Cross-dataset tests (train on one, test on the other) measure generalization (G7).
+- **Video:** real per-chunk sizes of the *EnvivioDash3* test video (48 chunks × 4 s, 6 bitrates),
+  so chunk sizes vary with scene complexity (VBR).
 
 ---
 
@@ -450,18 +458,32 @@ Results are reported as **mean ± std** over all test traces and as **CDFs**.
 
 ---
 
-## 11. Expected Results
+## 11. Results
 
-Based on prior literature (Pensieve, SIGCOMM'17), we expect:
+### 11.1 Baselines on real traces (QoE_lin, per-chunk mean ± std)
 
-- The RL agent to achieve roughly **10–25 % higher average QoE** than the best heuristic (RobustMPC)
-  on HSDPA and FCC traces.
+Measured with `python evaluate.py` (first chunk reported separately as startup delay, as in Pensieve):
+
+| Policy | HSDPA test (142) | FCC test (12) | Avg bitrate HSDPA (Mbps) | Rebuffer HSDPA (s) |
+|---|---|---|---|---|
+| RobustMPC | **0.880** ± 0.65 | **0.008** ± 3.39 | 1.13 | 1.21 |
+| BOLA | 0.764 ± 0.42 | −0.124 ± 3.19 | 0.94 | 0.05 |
+| RB | 0.734 ± 0.57 | −0.304 ± 3.30 | 0.93 | 1.30 |
+| BB | 0.601 ± 0.68 | −0.341 ± 3.40 | 1.14 | 2.03 |
+| FastMPC | 0.351 ± 0.85 | −0.230 ± 3.39 | 1.20 | 7.60 |
+| Fixed 300 kbps | 0.296 ± 0.05 | −0.612 ± 3.02 | 0.30 | 0.05 |
+| Random | −15.56 ± 12.0 | −20.79 ± 26.0 | 1.87 | 174.1 |
+
+Observations: RobustMPC is the strongest baseline (consistent with the literature); BOLA almost never
+stalls but under-uses bandwidth; BB switches quality very often (≈26 switches per video). FCC test
+traces contain zero-bandwidth outages, which cause unavoidable stalls for every algorithm.
+
+### 11.2 Expected RL results (hypotheses, to be replaced after training)
+
+- The RL agent to achieve roughly **10–25 % higher average QoE** than RobustMPC.
 - Gains mostly come from **reduced rebuffering** — the agent learns to build up buffer when
   bandwidth is good and lower quality early when throughput starts to drop.
-- BB achieves smooth playback but under-uses bandwidth; RB has frequent stalls and switches.
 - The RL agent should be within ~10–15 % of the offline optimal.
-
-*(These are hypotheses; actual numbers will be filled in after experiments.)*
 
 ---
 
@@ -516,34 +538,40 @@ and **(b) a presentation that people remember**. Items are ranked by impact-per-
 
 ---
 
-## 13. Planned Repository Structure
+## 13. Repository Structure
 
 ```
 ai-assignment-2/
 ├── README.md
 ├── data/
-│   ├── traces/           # FCC, HSDPA network traces (train/ test/)
-│   ├── traces_india/     # our own recorded traces (U1)
-│   ├── traces_scenarios/ # hand-crafted stress tests (U4)
-│   └── video/            # chunk size tables for each bitrate
+│   ├── traces/fcc/       # FCC broadband traces (train/ test/)
+│   ├── traces/hsdpa/     # Norway 3G traces (train/ test/)
+│   ├── traces/india/     # our own recorded traces (U1)
+│   ├── traces/scenarios/ # hand-crafted stress tests (U4)
+│   └── video/envivio/    # chunk size tables for each bitrate
 ├── abrsim/
-│   └── abr_env.py        # Gym-style trace-driven streaming simulator
+│   ├── config.py         # all simulator / MDP constants
+│   ├── abr_env.py        # trace-driven streaming simulator + MDP env
+│   ├── traces.py         # trace loading (dataset names), synthetic traces
+│   └── video.py          # chunk-size table
 ├── agents/
 │   ├── actor_critic.py   # A2C/A3C model + training
 │   ├── ppo.py            # PPO comparison (optional)
 │   └── dqn.py            # DQN comparison (optional)
 ├── baselines/
-│   ├── rate_based.py
-│   ├── buffer_based.py
-│   ├── bola.py
-│   ├── mpc.py
+│   ├── base.py           # policy interface, fixed/random
+│   ├── heuristics.py     # RB, BB, BOLA
+│   ├── mpc.py            # FastMPC / RobustMPC
 │   └── offline_optimal.py
 ├── train.py
 ├── evaluate.py           # runs all algorithms on test traces
 ├── explain/              # policy heatmaps, saliency (U3)
 ├── plots/                # scripts + generated graphs, learning timelapse GIF (P4)
 ├── web/                  # side-by-side player, draw-your-network, human-vs-AI (P1–P6)
-├── tools/trace_logger.py # records our own bandwidth traces on phone/laptop (U1)
+├── tools/
+│   ├── prepare_traces.py # downloads + splits the public traces
+│   └── trace_logger.py   # records our own bandwidth traces on phone/laptop (U1)
+├── tests/                # pytest suite
 └── report/               # two-column LaTeX (Overleaf) report
 ```
 

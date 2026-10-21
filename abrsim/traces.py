@@ -9,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
+TRACE_ROOT = Path(__file__).resolve().parent.parent / "data" / "traces"
+
 
 @dataclass
 class Trace:
@@ -30,6 +32,27 @@ def load_traces(trace_dir):
     if not paths:
         raise FileNotFoundError(f"no trace files in {trace_dir}")
     return [load_trace(p) for p in paths]
+
+
+def load_dataset(spec):
+    """Load traces by dataset name or path.
+
+    ``"hsdpa/test"`` -> data/traces/hsdpa/test; ``"train"`` -> every ``*/train`` dir (FCC + HSDPA);
+    ``"a+b"`` combines several specs; anything else is treated as a directory path.
+    """
+    traces = []
+    for part in spec.split("+"):
+        if (TRACE_ROOT / part).is_dir():
+            traces += load_traces(TRACE_ROOT / part)
+        elif part in ("train", "test"):
+            dirs = sorted(TRACE_ROOT.glob(f"*/{part}"))
+            if not dirs:
+                raise FileNotFoundError(f"no */{part} dirs in {TRACE_ROOT}; run tools/prepare_traces.py")
+            for d in dirs:
+                traces += [Trace(f"{d.parent.name}/{t.name}", t.times, t.bw_mbps) for t in load_traces(d)]
+        else:
+            traces += load_traces(part)
+    return traces
 
 
 def synthetic_trace(duration_s=600, seed=0, low=0.2, high=6.0, volatility=0.25, name=None):
