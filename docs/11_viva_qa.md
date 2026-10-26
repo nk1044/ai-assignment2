@@ -58,9 +58,36 @@ No:
 
 ## Algorithm
 
-**Q: Why A2C and not DQN/PPO?** See Ch. 09 §9.2. In short: continuous state → function approximation;
-a stochastic policy with a critic baseline handles heavy-tailed stall rewards better than Q-learning's
-max-operator. PPO would also work and is a natural extension.
+**Q: Why actor-critic and not DQN?** See Ch. 09 §9.2. In short: continuous state → function
+approximation, and a stochastic policy with a critic baseline handles heavy-tailed stall rewards better
+than Q-learning's max-operator.
+
+**Q: Why did you move from A2C to PPO?**
+A2C may only take one gradient step per rollout; after that the data is off-policy. PPO's clipped ratio
+keeps the new policy close to the old one, so each rollout can be reused for 4 epochs. That gives more
+learning per simulated video and steadier updates, with target-KL early stopping as a safety net.
+
+**Q: What is an asymmetric actor-critic?**
+The actor and critic get different inputs. Our critic also sees the *true* bandwidth of the next 32 s
+(read from the trace by the simulator). The actor sees only what a real player sees.
+
+**Q: Isn't that cheating?**
+No. The critic is only used during training to compute advantages; it is thrown away at deployment.
+The deployed actor never sees the future. The trick only improves the *training signal*.
+
+**Q: Does it make the problem an MDP?**
+Not for the agent. The actor still faces a POMDP. Only the critic's value estimate becomes closer to
+Markov, so it can tell "about to enter a tunnel" from "about to leave one" (an identical past, a
+different future) and give sharper advantages.
+
+**Q: Why give the critic the observation too, not just the future?**
+A critic conditioned only on hidden state can bias the policy gradient under partial observability
+(Baisero & Amato, 2022). Conditioning on observation + privileged information avoids it.
+
+**Q: Why didn't you start with the asymmetric critic?**
+We first reproduced the standard, published design (Pensieve's symmetric A2C) to validate the
+simulator and pipeline. The symmetric runs then serve as the control for measuring what the privileged
+critic adds.
 
 **Q: What does the critic do?**
 It estimates V(s), which gives a baseline for the policy gradient (lower variance without bias) and the
@@ -83,9 +110,14 @@ gradient scale stable between batches.
 They detect temporal patterns (drops, trends) in the 8-step histories with shared weights. This is the
 proven Pensieve architecture.
 
-**Q: Sync A2C vs A3C?**
+**Q: Sync A2C vs A3C?** (first agent)
 The same parallel experience; synchronous is deterministic and simpler. With batched inference it is
 efficient on one CPU.
+
+**Q: What do the PPO numbers in the log mean?**
+- `KL`: how far one update moved the policy (healthy < 0.03).
+- `clip_frac`: the share of samples where clipping was active (~0.1 is healthy).
+- `ep`: PPO epochs actually used (4 unless target-KL stopped early).
 
 **Q: How long does training take / how much experience?**
 30 k updates × 16 videos × 48 chunks ≈ 23 M decisions ≈ 1 000 days of video. 53 minutes on a laptop CPU.
@@ -93,8 +125,9 @@ efficient on one CPU.
 ## Results
 
 **Q: Does RL beat the baselines?**
-Yes. On 142 unseen 3G traces A2C scores 0.934 vs RobustMPC's 0.907, and it stalls 5× less (0.17 vs 0.91 s
-per video). It is still 18 % below the offline optimum (1.145).
+Yes. On 142 unseen 3G traces the first A2C agent scores 0.934 vs RobustMPC's 0.907, and it stalls 5× less
+(0.17 vs 0.91 s per video). It also wins on FCC (0.644 vs 0.604) and the scenarios (1.047 vs 0.738;
+metro tunnel +0.16 vs −1.79). PPO results are in `experiments/README.md`. It is still 18 % below the offline optimum (1.145).
 
 **Q: Why is the gain smaller than Pensieve's 12–25 %?**
 - Pensieve compared against MPC variants under its own setup.

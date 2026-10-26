@@ -1,5 +1,8 @@
 """Collect complete videos from ``n_envs`` simulators in lock-step.
 
+Besides the actor's observations it records, for every step, the privileged critic input: the true
+bandwidth of the next 32 s at the moment of the decision (``ABREnv.privileged``).
+
 Every video has the same number of chunks, so all envs finish together and a rollout is a clean
 (T = TOTAL_CHUNKS, N = n_envs) batch.
 """
@@ -26,14 +29,16 @@ class RolloutCollector:
                 env.data_lambda = float(lam)
         states = np.stack([env.reset() for env in self.envs])
 
-        buf = {k: [] for k in ("states", "actions", "rewards", "dones")}
+        buf = {k: [] for k in ("states", "privileged", "actions", "rewards", "dones")}
         infos = []
         done = False
         while not done:
             extras = None if lambdas is None else lambdas[:, None]
             actions = agent.act(states, extras, rng=self.rng)
+            privileged = np.stack([env.privileged() for env in self.envs])   # at decision time; critic only
             steps = [env.step(a) for env, a in zip(self.envs, actions)]
             buf["states"].append(states)
+            buf["privileged"].append(privileged)
             buf["actions"].append(actions)
             buf["rewards"].append(np.array([s[1] for s in steps], dtype=np.float32))
             dones = np.array([s[2] for s in steps], dtype=np.float32)

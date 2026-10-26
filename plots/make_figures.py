@@ -171,7 +171,7 @@ def fig_tradeoff(res, set_name, out_dir):
 
 
 # --------------------------------------------------------------------------- G5
-def fig_timeseries(res, set_name, out_dir, trace_name=None, policies=("BB", "RobustMPC", "A2C", "Oracle")):
+def fig_timeseries(res, set_name, out_dir, trace_name=None, policies=("BB", "RobustMPC", "PPO", "Oracle")):
     pols = [p for p in ordered(res) if p in policies]
     by_trace = defaultdict(dict)
     for p in pols:
@@ -244,7 +244,7 @@ SCENARIO_TITLES = {"metro_tunnel": "Metro tunnel", "stadium_crowd": "Stadium cro
                    "highway_handover": "Highway handover", "flaky_wifi": "Flaky Wi-Fi", "rural_edge": "Rural edge"}
 
 
-def fig_scenarios(res, out_dir, policies=("Oracle", "A2C", "RobustMPC", "BOLA", "RB", "BB")):
+def fig_scenarios(res, out_dir, policies=("Oracle", "PPO", "RobustMPC", "BOLA", "RB", "BB")):
     pols = [p for p in ordered(res) if p in policies]
     scen = list(SCENARIO_TITLES)
     traces = {t.name: t for t in load_dataset("scenarios")}
@@ -291,7 +291,7 @@ def fig_training(run_dir, out_dir, baselines=None):
     rows = read_csv(log)
     it = [r["iter"] for r in rows]
     fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.8))
-    axes[0].plot(it, [r["val_qoe"] for r in rows], color=color("A2C"), label="A2C (validation)")
+    axes[0].plot(it, [r["val_qoe"] for r in rows], color=color("PPO"), label="PPO (validation)")
     for p, v in (baselines or {}).items():
         axes[0].axhline(v, color=color(p), linestyle="--" if p == "Oracle" else ":", linewidth=1.2, label=label(p))
     axes[0].set_xlabel("Training iteration")
@@ -309,7 +309,7 @@ def fig_training(run_dir, out_dir, baselines=None):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--results", default=str(ROOT / "results" / "baselines"))
-    p.add_argument("--run", default=str(ROOT / "runs" / "a2c_lin"), help="training run for the learning curve")
+    p.add_argument("--run", default=str(ROOT / "runs" / "ppo_asym"), help="training run for the learning curve")
     p.add_argument("--out", default=str(ROOT / "plots" / "figures"))
     args = p.parse_args()
 

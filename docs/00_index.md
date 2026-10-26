@@ -11,7 +11,7 @@ Study notes for explaining, defending, and rebuilding this project. They assume 
 | 04 | [Simulator](04_simulator.md) | explain (and re-implement) the trace-driven streaming simulator line by line |
 | 05 | [Data](05_data.md) | explain where every trace/video file comes from, its format, and the splits |
 | 06 | [Baselines and the oracle](06_baselines.md) | explain RB, BB, BOLA, MPC, RobustMPC and the offline-optimal DP |
-| 07 | [The A2C agent](07_agent_a2c.md) | explain the network, the loss, GAE, entropy decay, the training loop |
+| 07 | [The RL agent](07_agent.md) | explain PPO, the asymmetric (privileged) critic, GAE, the training loop, the A2C history |
 | 08 | [Evaluation and results](08_evaluation.md) | explain the test protocol, metrics, every figure, and the numbers |
 | 09 | [Technology choices](09_tech_choices.md) | defend every tool/algorithm choice against alternatives |
 | 10 | [Rebuild guide](10_rebuild_guide.md) | rewrite the whole project from scratch in the right order |
@@ -29,12 +29,14 @@ video stalls. Too low → a blurry picture. Switching too often → visible flic
 - **Reward:** the per-chunk QoE, `q(R) − 4.3·stall − |Δq|`.
 
 We build a trace-driven simulator that replays **real recorded bandwidth traces** (Norway 3G, FCC
-broadband) together with the real chunk sizes of a test video. We then train an **advantage actor-critic (A2C)** agent
-with 16 parallel simulators, GAE and entropy decay. It is compared against 5 classic ABR algorithms and a
+broadband) together with the real chunk sizes of a test video. We then train a **PPO** agent with
+16 parallel simulators and GAE. Its **asymmetric critic** sees the true future bandwidth during training
+only; the deployed actor sees just the normal observation. The first agents were A2C with a symmetric
+critic, and they are kept as an experiment history. It is compared against 5 classic ABR algorithms and a
 dynamic-programming **offline optimal** that knows the future. On 142 unseen 3G traces:
 - the best classic algorithm (RobustMPC) scores 0.907 QoE per chunk;
 - the optimum scores 1.145;
-- the RL agent's job is to close that 21 % gap.
+- the RL agent's job is to close that 21 % gap. A2C v1 already reached 0.934.
 
 ## Key numbers to remember
 
@@ -45,7 +47,7 @@ dynamic-programming **offline optimal** that knows the future. On 142 unseen 3G 
 | State | 6 × 8 matrix (25 meaningful numbers) |
 | Reward | `q(R_t) − 4.3·T_t − \|q(R_t) − q(R_{t−1})\|` (q in Mbps, T = stall seconds) |
 | Buffer cap | 60 s |
-| Train / validation / test traces | 115 → 104 train + 11 val / 142 HSDPA + 12 FCC test |
-| Network size | ≈ 266 k parameters each for actor and critic |
-| Training | 30 000 updates × 16 videos × 48 chunks ≈ 23 M decisions, ≈ 1–1.5 h CPU |
-| RobustMPC / Optimal on HSDPA test | 0.907 / 1.145 QoE per chunk |
+| Train / validation / test traces | 115 → 103 train + 12 val / 142 HSDPA + 12 FCC test |
+| Network size | actor ≈ 266 k parameters, privileged critic ≈ 348 k |
+| Training (PPO) | 10 000 rollouts × 16 videos, 4 epochs each, ≈ 1.05 h CPU (A2C: 30 000 updates ≈ 53 min) |
+| HSDPA test QoE | RobustMPC 0.907, A2C v1 0.934, A2C v2 0.924, optimum 1.145; PPO: see `experiments/README.md` |

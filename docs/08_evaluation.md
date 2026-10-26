@@ -29,7 +29,8 @@
 
 ## 8.3 Results so far
 
-**HSDPA test (142 unseen traces), QoE_lin, first training run:**
+**HSDPA test (142 unseen traces), QoE_lin, first training run (A2C v1).** Every run, including PPO, is
+compared in `experiments/README.md`.
 
 | Policy | QoE/chunk | Bitrate (Mbps) | Stall (s/video) | Switches | Startup (s) |
 |---|---|---|---|---|---|
@@ -62,8 +63,8 @@ No heuristic wins every scenario. RobustMPC is the best on real traces but the w
 
 ## 8.4 Figures (`plots/make_figures.py` → `plots/figures/`)
 
-The style is fixed: each algorithm always has the same colour (A2C blue, RobustMPC orange, BOLA aqua,
-RB yellow, BB pink, FastMPC green, fixed violet). The oracle is grey and hatched/dashed, as a reference.
+The style is fixed: each algorithm always has the same colour (PPO blue, A2C red, RobustMPC orange,
+BOLA aqua, RB yellow, BB pink, FastMPC green, fixed violet). The oracle is grey and hatched/dashed, as a reference.
 Each figure is written as PNG (slides) and PDF (LaTeX). PDF timestamps are stripped so regenerating does
 not create git noise.
 
@@ -78,5 +79,5 @@ not create git noise.
 | `g6_tradeoff_*` | average bitrate vs % time stalled | the quality–stall frontier |
 | `g7_scenarios` | per-scenario bandwidth sparkline + QoE bars | the tunnel story |
 
-To add the agent: run the three `evaluate.py --oracle --agent A2C=...` commands (`commands.md`), then
-`make_figures.py`. Every chart picks up `A2C_traces.csv` automatically.
+To add the agent: run the three `evaluate.py --oracle --agent PPO=...` commands (`commands.md`), then
+`make_figures.py`. Every chart picks up `PPO_traces.csv` (and `A2C_traces.csv`, if present) automatically.

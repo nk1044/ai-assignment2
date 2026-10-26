@@ -8,19 +8,20 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 # Validated categorical palette (light mode), assigned in fixed slot order.
 POLICY_COLORS = {
-    "A2C": "#2a78d6",        # slot 1 blue   — our agent
+    "PPO": "#2a78d6",        # slot 1 blue   — our agent (PPO, asymmetric critic)
     "RobustMPC": "#eb6834",  # slot 2 orange
     "BOLA": "#1baf7a",       # slot 3 aqua
     "RB": "#eda100",         # slot 4 yellow
     "BB": "#e87ba4",         # slot 5 magenta
     "FastMPC": "#008300",    # slot 6 green
     "fixed_300": "#4a3aa7",  # slot 7 violet
-    "random": "#e34948",     # slot 8 red
+    "A2C": "#e34948",        # slot 8 red    — earlier symmetric A2C agent (comparison only)
+    "random": "#e34948",     # never plotted (off-scale); tables only
     "Oracle": "#8a8984",     # neutral reference, drawn dashed
 }
 POLICY_LABELS = {"fixed_300": "Fixed 300k", "random": "Random", "Oracle": "Offline optimal"}
 # Order used in every legend / bar chart.
-POLICY_ORDER = ["Oracle", "A2C", "RobustMPC", "BOLA", "RB", "BB", "FastMPC", "fixed_300", "random"]
+POLICY_ORDER = ["Oracle", "PPO", "A2C", "RobustMPC", "BOLA", "RB", "BB", "FastMPC", "fixed_300", "random"]
 
 INK = "#0b0b0b"
 INK_2 = "#52514e"

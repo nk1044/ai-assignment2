@@ -73,6 +73,26 @@ class StreamingSimulator:
             self.last_time = self.trace.times[self.ptr]
             self._next_ptr()
 
+    def future_bandwidth(self, n_windows=C.PRIV_WINDOWS, window_s=C.PRIV_WINDOW_S):
+        """Mean true bandwidth (Mbps) in each of the next ``n_windows`` windows of ``window_s`` seconds,
+        read from the trace at the current position without moving it. Privileged information: only
+        the critic may use it during training — a real player cannot see the future."""
+        ptr, t = self.ptr, self.last_time
+        out = np.zeros(n_windows, dtype=np.float32)
+        for w in range(n_windows):
+            remaining, acc = window_s, 0.0
+            while remaining > 1e-9:
+                step = min(self.trace.times[ptr] - t, remaining)
+                acc += self.trace.bw_mbps[ptr] * step
+                remaining -= step
+                t += step
+                if t >= self.trace.times[ptr] - 1e-12:      # sample interval used up: next one
+                    ptr += 1
+                    if ptr >= len(self.trace):
+                        ptr, t = 1, self.trace.times[0]
+            out[w] = acc / window_s
+        return out
+
     def get_state(self):
         return (self.ptr, self.last_time, self.chunk_idx, self.buffer_s)
 
@@ -144,6 +164,10 @@ class ABREnv:
         self.state[4, :C.A_DIM] = self.sim.chunk_sizes[:, 0] / 1e6
         self.state[5, -1] = 1.0
         return self.state.copy()
+
+    def privileged(self):
+        """Critic-only observation: true bandwidth over the next 32 s (see ``future_bandwidth``)."""
+        return self.sim.future_bandwidth()
 
     def step(self, action):
         action = int(action)

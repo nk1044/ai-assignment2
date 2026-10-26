@@ -3,7 +3,7 @@
     python evaluate.py                                # HSDPA test traces, all baselines
     python evaluate.py --traces fcc/test --qoe log    # dataset name or a directory path
     python evaluate.py --traces synthetic
-    python evaluate.py --agent A2C=runs/a2c_lin/best.pt     # add trained agent(s) to the comparison
+    python evaluate.py --agent PPO=runs/ppo_asym/best.pt    # add trained agent(s) to the comparison
     python evaluate.py --oracle                              # also run the offline optimal (~1.5 min)
 
 Test-time simulation is deterministic (every video starts at the beginning of its trace, no delay
@@ -106,7 +106,7 @@ def main():
     for spec in args.agent:
         from agents import RLPolicy                      # imported lazily: baselines need no torch
         name, _, path = spec.rpartition("=")
-        policies.append(RLPolicy.from_checkpoint(path, name or "A2C"))
+        policies.append(RLPolicy.from_checkpoint(path, name or "PPO"))
     for policy in policies:
         env = ABREnv(traces, qoe=args.qoe, data_lambda=args.data_lambda, seed=args.seed, noise=False,
                      random_start=False)

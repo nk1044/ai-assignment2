@@ -79,18 +79,28 @@ It uses a fresh noise-free `StreamingSimulator` with `set_state` to branch.
 `FeatureExtractor` (3 Linear(1→128) for the scalars, 3 Conv1d(1→128, k=4) for the rows, concat → 2048 →
 Linear(128)), then `Actor` (→6 logits) and `Critic` (→1).
 
-**Check:** output shapes (B, 6) and (B,); parameter count ≈ 265 k.
+The critic gets one more Conv1d branch over the 8 future-bandwidth windows (`priv_len = 8`); the actor does not.
 
-## Step 10 — A2C (`agents/a2c.py`)
-`A2CConfig` dataclass; `A2CAgent` with `act`, `advantages` (GAE backwards loop), `update` (normalised
-advantages, actor loss with an entropy bonus, critic MSE, grad clipping, two Adam optimisers),
-`entropy_weight` (linear decay), and `save/load`.
+**Check:** output shapes (B, 6) and (B,); parameter count ≈ 266 k (actor) / 348 k (critic); the critic output changes when only the privileged input changes.
 
-**Check:** with a zero critic and λ = 1, the GAE equals discounted returns; one update changes the weights
-and gives finite losses; save→load reproduces the probabilities.
+## Step 10 — Privileged information + PPO (`abrsim` + `agents/ppo.py`)
+1. `StreamingSimulator.future_bandwidth()`: integrate the trace forward from `(ptr, last_time)` into 8 windows of 4 s **without moving the simulator**; `ABREnv.privileged()` returns it.
+2. `PPOConfig` dataclass; `PPOAgent` with:
+   - `act`;
+   - `advantages(rollout)` (GAE with `V(s, f)`);
+   - `update` (old log-probs once, then 4 epochs × 4 minibatches of the clipped surrogate + entropy, critic MSE, grad clipping, target-KL early stop);
+   - `entropy_weight` (linear decay);
+   - `save/load`.
+
+**Check:**
+- on a hand-made trace the windows equal hand-computed means, and the simulator state is unchanged;
+- with a zero critic and λ = 1 the GAE equals discounted returns;
+- one update gives finite losses, KL < 0.5 and clip_frac in [0, 1];
+- a tiny target KL stops the epochs early;
+- save→load reproduces the probabilities.
 
 ## Step 11 — Rollouts and the training script
-1. `RolloutCollector`: 16 envs, lock-step, batched `act`, stack into (48, 16, …).
+1. `RolloutCollector`: 16 envs, lock-step, batched `act`. Record `privileged()` **before** `env.step` (decision time), then stack into (48, 16, …).
 2. `RLPolicy`: wraps the agent (greedy) in the `Policy` interface.
 3. `train.py`:
    - 90/10 split of the training pool;
@@ -102,8 +112,9 @@ and gives finite losses; save→load reproduces the probabilities.
 
 ## Step 12 — Train and evaluate
 ```bash
-python train.py --run-name a2c_lin                         # ≈ 1 h
-python evaluate.py --oracle --agent A2C=runs/a2c_lin/best.pt
+python train.py --run-name ppo_asym                        # ≈ 1.05 h
+python evaluate.py --oracle --agent PPO=runs/ppo_asym/best.pt
+python tools/record_experiment.py --run runs/ppo_asym --name PPO_asym --algo "PPO, asymmetric critic"
 ```
 Watch entropy in the log. If it stays at ≈ 1.79 (uniform) for a long time, lower `--entropy-start`.
 
@@ -121,4 +132,6 @@ Watch entropy in the log. If it stays at ≈ 1.79 (uniform) for a long time, low
 | Logger timeout ≤ TLS handshake | trace of all zeros | background thread + sampler |
 | Uncapped logger | 43 MB in 4 s on fast links | `--cap-mbps 8` |
 | Entropy weight too high for normalised advantages | the policy stays uniform for 15 k iterations | lower `entropy_start` |
+| Recording privileged info *after* `env.step` | the critic sees the future of the *next* state (off by one decision) | read it before stepping; test checks it |
+| Validation on 12 single videos | the better-validating A2C v2 tested worse than v1 | 4 random starts per validation trace |
 | Matplotlib PDF timestamps | figures always appear as modified in git | `metadata={"CreationDate": None}` |

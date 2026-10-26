@@ -22,6 +22,10 @@ S_LEN = 8                             # history length
 BUFFER_NORM_S = 10.0
 DELAY_NORM_S = 10.0
 
+# Privileged critic input (asymmetric actor-critic): true future bandwidth, training only
+PRIV_WINDOWS = 8                      # number of look-ahead windows
+PRIV_WINDOW_S = 4.0                   # seconds per window (8 x 4 s = 32 s of future)
+
 # Reward (README §4.4): q(R) mapping and rebuffer penalty mu per QoE variant
 REBUF_PENALTY = {"lin": 4.3, "log": 2.66, "hd": 8.0}
 HD_REWARD = [1, 2, 3, 12, 15, 20]

@@ -2,8 +2,8 @@
 different code versions can be compared at the end.
 
     python tools/record_experiment.py --baselines                       # store baseline numbers once
-    python tools/record_experiment.py --run runs/a2c_lin --name A2C_v1 --algo "A2C, symmetric critic" \
-        --notes "entropy 1.0->0.05 over 20k"
+    python tools/record_experiment.py --run runs/ppo_asym --name PPO_asym --algo "PPO, asymmetric critic" \
+        --notes "default settings"
 
 For a run it evaluates ``best.pt`` on hsdpa/test, fcc/test and scenarios (deterministic test protocol),
 then writes ``experiments/<name>/`` (config.json, train_log.csv, test_<set>.csv per-trace results) and
@@ -132,8 +132,8 @@ def write_readme():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--run", help="training run directory, e.g. runs/a2c_lin")
-    p.add_argument("--name", help="short experiment name, e.g. A2C_v1")
+    p.add_argument("--run", help="training run directory, e.g. runs/ppo_asym")
+    p.add_argument("--name", help="short experiment name, e.g. PPO_asym")
     p.add_argument("--algo", default="")
     p.add_argument("--notes", default="")
     p.add_argument("--baselines", action="store_true", help="store baseline results from results/baselines/")

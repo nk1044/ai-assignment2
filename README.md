@@ -9,8 +9,9 @@ python tools/prepare_traces.py   # (only if data/ is missing) fetch real traces 
 pytest                           # simulator + baseline tests
 python evaluate.py --oracle      # all baselines + offline optimal on HSDPA test traces (~1.5 min)
 python evaluate.py --traces fcc/test --qoe log
-# training (≈1 h, CPU):  python train.py --run-name a2c_lin
-# evaluate a trained agent: python evaluate.py --oracle --agent A2C=runs/a2c_lin/best.pt
+# training (≈1 h, CPU):  python train.py --run-name ppo_asym
+# evaluate a trained agent: python evaluate.py --oracle --agent PPO=runs/ppo_asym/best.pt
+# record a run for the final comparison: python tools/record_experiment.py --run runs/ppo_asym --name PPO_asym
 python tools/make_scenarios.py && python evaluate.py --traces scenarios --oracle   # stress tests
 python plots/make_figures.py     # report figures → plots/figures/
 ```
@@ -20,7 +21,8 @@ python plots/make_figures.py     # report figures → plots/figures/
 - [x] Part 1 – Trace-driven streaming simulator + MDP environment (`abrsim/`)
 - [x] Part 2 – Baselines (RB, BB, BOLA, MPC) + evaluation script (`baselines/`, `evaluate.py`)
 - [x] Part 3 – Real traces (FCC, HSDPA) + EnvivioDash3 video sizes (`data/`, `tools/prepare_traces.py`)
-- [x] Part 4 – Actor-critic agent code + training script (`agents/`, `train.py`; training run deferred to the end)
+- [x] Part 4 – Actor-critic agent + training script (`agents/`, `train.py`); A2C v1/v2 trained and recorded
+- [x] Part 4b – PPO with an asymmetric (privileged) critic replaces A2C (`agents/ppo.py`); results log in `experiments/`
 - [x] Part 5 – Offline-optimal upper bound + result graphs (`baselines/oracle.py`, `plots/`)
 - [x] Part 6a – Stress-test scenarios + trace logger for our own traces (`tools/make_scenarios.py`, `tools/trace_logger.py`)
 - [ ] Part 6b – Explainability (policy heatmap, saliency) + learning timelapse
@@ -42,7 +44,7 @@ python plots/make_figures.py     # report figures → plots/figures/
    - 4.5 [Discount Factor and Episode](#45-discount-factor-and-episode)
 5. [Environment (Simulator)](#5-environment-simulator)
 6. [Network Traces (Data)](#6-network-traces-data)
-7. [RL Algorithm: Actor-Critic (A2C / A3C)](#7-rl-algorithm-actor-critic-a2c--a3c)
+7. [RL Algorithm: PPO with an Asymmetric Critic](#7-rl-algorithm-ppo-with-an-asymmetric-privileged-critic)
 8. [Baseline Algorithms](#8-baseline-algorithms)
 9. [Evaluation Metrics](#9-evaluation-metrics)
 10. [Experiments and Graphs](#10-experiments-and-graphs)
@@ -325,111 +327,120 @@ with Pensieve; see [data/README.md](data/README.md)):
 
 ---
 
-## 7. RL Algorithm: Actor-Critic (A2C / A3C)
+## 7. RL Algorithm: PPO with an Asymmetric (Privileged) Critic
 
-### 7.1 Why Actor-Critic?
+### 7.1 Why actor-critic, and why PPO
 
 | Algorithm | Suitable? | Reason |
 |---|---|---|
 | Tabular Q-learning | ✗ | Continuous 25-dim state → infinite table. |
-| DQN | possible | Works for discrete actions, but value-based methods are less stable with stochastic environments and give deterministic greedy policies. |
-| **Actor-Critic (A2C/A3C)** | ✓ **chosen** | Directly learns a stochastic policy `π(a\|s)`; critic reduces variance; parallel workers explore many traces simultaneously. Proven on ABR (Pensieve). |
-| PPO | ✓ (comparison) | A more stable actor-critic variant; we will compare against it. |
+| DQN | possible | Discrete actions, but the max-operator overestimates under heavy-tailed stall rewards; needs a replay buffer and target network; exploration only via ε. |
+| A2C (actor-critic) | ✓ (our first agent, v1/v2) | Stochastic policy + critic baseline, parallel environments. Proven on ABR (Pensieve). One gradient step per rollout. |
+| **PPO** | ✓ **current agent** | Actor-critic with a clipped surrogate objective: it can safely reuse every rollout for several epochs of minibatch updates, so it learns more per simulated video and is more stable. |
 
-### 7.2 Network Architecture
+### 7.2 Asymmetric actor-critic
+
+The actor is deployed in a real player, so it may only use what a player observes (the 6×8 state, §4.1).
+The critic is used **only during training**, inside the simulator, which knows the whole bandwidth trace.
+We therefore give the critic **privileged information**: the true mean bandwidth over the next
+8 windows of 4 s (32 s of future) at the moment of each decision (`ABREnv.privileged()`).
+
+- The actor still faces a POMDP (unchanged at deployment).
+- The critic's value estimate `V(s, future)` can tell "about to enter a tunnel" from "about to recover",
+  which look identical in the past-only observation. This makes advantage estimates sharper and lower-variance.
+- The critic receives the actor's observation **and** the privileged input. A critic that sees only the
+  hidden state can bias the policy gradient under partial observability (Baisero & Amato, 2022).
+
+### 7.3 Network Architecture
 
 ```
-          s_t (6 × 8)
-              │
- ┌────────────┼─────────────────────────────────────────┐
- │ last bitrate, buffer, chunks left → Dense(128)       │
- │ throughput history (8)  → Conv1D(128, kernel=4)      │
- │ download-time hist. (8) → Conv1D(128, kernel=4)      │
- │ next chunk sizes (6)    → Conv1D(128, kernel=4)      │
- └────────────┬─────────────────────────────────────────┘
-              │ concatenate + flatten
+          s_t (6 × 8)                                      future bandwidth (8 × 4 s)   [critic only]
+              │                                                        │
+ ┌────────────┼─────────────────────────────────────────┐              │
+ │ last bitrate, buffer, chunks left → Dense(128) each  │              │
+ │ throughput history (8)  → Conv1D(128, kernel=4)      │      Conv1D(128, kernel=4)
+ │ download-time hist. (8) → Conv1D(128, kernel=4)      │              │
+ │ next chunk sizes (6)    → Conv1D(128, kernel=4)      │              │
+ └────────────┬─────────────────────────────────────────┘              │
+              │ concatenate (actor: 2048, critic: 2048 + 640) ◄─────────┘
            Dense(128, ReLU)
               │
    ┌──────────┴──────────┐
  Actor head             Critic head
  Dense(6) + Softmax     Dense(1)
- π_θ(a | s)             V_φ(s)
+ π_θ(a | s)             V_φ(s, future)
 ```
 
-Actor and critic have the **same structure but separate parameters** (θ and φ).
+Actor and critic have **separate parameters**. The actor has ≈ 266 k parameters, the critic ≈ 348 k.
 
-### 7.3 Training Objective
+### 7.4 Training Objective
 
-We implement **synchronous A2C**: `N = 16` simulators (the parallel actors of A3C) each stream one full
-video with the current policy, then a single batched update is made (`agents/a2c.py`). This gives
-the same decorrelated experience as A3C, but is deterministic and easier to debug.
+Per iteration, 16 simulators each stream one video with the current policy (48 × 16 = 768
+transitions). Then:
 
-**Advantage — Generalized Advantage Estimation (GAE):**
-
+**Advantages (GAE, privileged critic):**
 ```
-δ_t = r_t + γ V_φ(s_{t+1}) − V_φ(s_t)            (one-step TD error; V = 0 after the last chunk)
-A_t = Σ_k (γλ)^k δ_{t+k}                          (λ = 0.95; λ = 0 → one-step TD, λ = 1 → Monte-Carlo)
-G_t = A_t + V_φ(s_t)                              (critic target)
+δ_t = r_t + γ V_φ(s_{t+1}, f_{t+1}) − V_φ(s_t, f_t)      (V = 0 after the last chunk; f = future bandwidth)
+A_t = Σ_k (γλ)^k δ_{t+k},   G_t = A_t + V_φ(s_t, f_t)     (λ = 0.95), A normalized per batch
 ```
 
-Advantages are normalized to zero mean / unit variance per batch.
-
-**Actor (policy gradient) update with entropy regularization:**
-
+**PPO clipped surrogate (actor),** with `ρ_t = π_θ(a_t|s_t) / π_θold(a_t|s_t)`:
 ```
-L_actor(θ) = − mean_t [ log π_θ(a_t | s_t) · A_t ]  −  β · mean_t H(π_θ(· | s_t))
+L_actor(θ)  = − mean_t min( ρ_t A_t ,  clip(ρ_t, 1 − 0.2, 1 + 0.2) A_t )  −  β · mean_t H(π_θ(·|s_t))
+L_critic(φ) = mean_t ( G_t − V_φ(s_t, f_t) )²
 ```
 
-**Critic (value regression) update:**
+4 epochs × 4 minibatches of 192 transitions per rollout. The epochs stop early if the approximate KL
+to the old policy exceeds 0.03. The entropy weight β decays linearly 0.1 → 0.01 over 6 000 iterations.
 
-```
-L_critic(φ) = mean_t ( G_t − V_φ(s_t) )²
-```
-
-- `H(π) = −Σ_a π(a|s) log π(a|s)` is the **entropy** bonus — encourages exploration early on.
-  `β` is decayed linearly from 1.0 → 0.05 over the first 20k updates so the policy becomes decisive.
-- Gradients are clipped to norm 5.
-
-### 7.4 Hyperparameters
+### 7.5 Hyperparameters
 
 | Hyperparameter | Value |
 |---|---|
-| Actor learning rate `α_θ` | 1e-4 (Adam) |
-| Critic learning rate `α_φ` | 1e-3 (Adam) |
-| Discount `γ` | 0.99 |
-| GAE `λ` | 0.95 |
-| Entropy weight `β` | 1.0 → 0.05 (linear over 20k updates) |
+| Actor / critic learning rate | 1e-4 / 1e-3 (Adam) |
+| Discount `γ`, GAE `λ` | 0.99, 0.95 |
+| PPO clip `ε`, epochs, minibatches | 0.2, 4, 4 (192 transitions each) |
+| Target KL (early stop) | 0.03 |
+| Entropy weight `β` | 0.1 → 0.01 (linear over 6 000 iterations) |
 | Parallel environments | 16 |
-| Batch per update | 16 videos × 48 chunks = 768 transitions |
 | Gradient clip | 5.0 |
-| Training length | 30k updates (≈ 23M chunks, ≈ 1.1 h on a laptop CPU at ~135 ms/update) |
-| Validation | greedy policy on 10 % of training traces (held out), every 250 updates |
+| Training length | 10 000 rollouts (≈ 160 k videos, ≈ 1.05 h on a laptop CPU, ≈ 380 ms per iteration) |
+| Validation | greedy policy, 12 held-out training traces × 4 random starts, every 100 iterations |
 
 All are command-line flags of `train.py`.
 
-### 7.5 Training Loop (pseudo-code)
+### 7.6 Training Loop (pseudo-code)
 
 ```
 split training traces → 90 % train, 10 % validation
-initialize actor θ, critic φ
-for iteration = 1 … 30k:
-    for each of 16 envs: pick a random train trace + random start offset
-    stream one full video in every env with a ~ π_θ(·|s)          (rollout, 48 × 16)
-    compute GAE advantages A_t and returns G_t with the critic
-    one Adam step on L_actor (θ) and on L_critic (φ); decay β
-    every 1000 iters: save checkpoint (used for the "watch it learn" timelapse)
-    every 250 iters: evaluate greedy policy on validation traces → keep best.pt
-final: evaluate best.pt once on the untouched test traces (evaluate.py --agent)
+for iteration = 1 … 10k:
+    16 envs: random train trace + random start; stream one video each with a ~ π_θ(·|s)
+             record s_t, a_t, r_t and the privileged future bandwidth f_t at each decision
+    compute GAE advantages with V_φ(s, f)
+    π_old ← π_θ;  4 epochs × 4 minibatches of PPO steps (early stop on KL)
+    every 500 iters: checkpoint (learning timelapse);  every 100: validate → keep best.pt
+final: evaluate best.pt once on the untouched test traces
 ```
 
-At **test time** the agent picks `a = argmax_a π_θ(a|s)` (deterministic).
+At **test time** only the actor is used: `a = argmax_a π_θ(a|s)`. No privileged information.
 
-### 7.6 Data-Saver Conditioning (U2)
+### 7.7 Data-Saver Conditioning (U2)
 
-With `--lambda-range lo hi`, every training video samples a data-cost weight `λ ~ U(lo, hi)`; the reward
-gets `− λ · chunk_size_MB` and `λ` is fed to both networks as an extra input (a Dense branch merged into
-the feature layer). One trained agent then covers the whole "max quality ↔ data saver" range, selected
-at run time by a slider.
+With `--lambda-range lo hi`, every training video samples a data-cost weight `λ ~ U(lo, hi)`. The reward
+gets `− λ · chunk_size_MB`, and `λ` is fed to both networks as an extra input. One trained agent then
+covers the whole "max quality ↔ data saver" range, selected at run time by a slider.
+
+### 7.8 Experiment History
+
+All runs are recorded in [experiments/README.md](experiments/README.md) by `tools/record_experiment.py`:
+
+| Run | Algorithm | HSDPA test QoE | Note |
+|---|---|---|---|
+| A2C_v1 | A2C, symmetric critic | 0.934 | entropy 1.0 → 0.05 too strong: policy ≈ uniform for ~15 k of 30 k updates |
+| A2C_v2 | A2C, symmetric critic | 0.924 | entropy 0.2 → 0.05: learns faster, but the noisy 12-video validation picked a weaker checkpoint |
+| PPO (asym.) | PPO, privileged critic | *pending* | also validates on 4 random starts per trace (48 videos) to make checkpoint selection less noisy |
+
+---
 
 ## 8. Baseline Algorithms
 
@@ -481,7 +492,7 @@ remaining 47 chunks. Training uses random start offsets and ±10 % delay noise.
 | G7 | **Generalization:** train on FCC → test on HSDPA (and vice-versa) | Tests overfitting to a dataset. |
 | G8 | **Ablation:** remove a state feature (e.g. no throughput history / no buffer / no chunk sizes) and measure QoE drop | Shows importance of each state component. |
 | G9 | **Sensitivity to μ:** QoE components as stall penalty varies | Shows incentive design effect. |
-| G10 | **A2C vs PPO vs DQN learning curves** | Justifies algorithm choice. |
+| G10 | **A2C (symmetric) vs PPO (asymmetric critic) learning curves and test QoE** | Justifies algorithm choice (`experiments/`). |
 
 ---
 
@@ -537,8 +548,8 @@ stalls for many seconds. No single heuristic wins every scenario — the motivat
 | G6 – Quality vs. stalls trade-off | ![](plots/figures/g6_tradeoff_hsdpa_test.png) |
 | G1 – Learning curve | *after training (Part 7)* |
 
-The A2C agent is added to every figure automatically once it is evaluated
-(`python evaluate.py --oracle --agent A2C=runs/a2c_lin/best.pt`).
+The RL agent is added to every figure automatically once it is evaluated
+(`python evaluate.py --oracle --agent PPO=runs/ppo_asym/best.pt`).
 
 ### 11.4 Expected RL results (hypotheses, to be replaced after training)
 
@@ -618,9 +629,9 @@ ai-assignment-2/
 │   ├── traces.py         # trace loading (dataset names), synthetic traces
 │   └── video.py          # chunk-size table
 ├── agents/
-│   ├── networks.py       # actor / critic (Conv1D + Dense feature extractor)
-│   ├── a2c.py            # A2C update (GAE, entropy decay), checkpoints
-│   ├── rollout.py        # 16 parallel simulators, lambda conditioning
+│   ├── networks.py       # actor / privileged critic (Conv1D + Dense feature extractor)
+│   ├── ppo.py            # PPO update (clipped surrogate, GAE, entropy decay, KL early stop), checkpoints
+│   ├── rollout.py        # 16 parallel simulators, privileged future bandwidth, lambda conditioning
 │   └── policy.py         # wraps a checkpoint as an evaluate.py policy
 ├── baselines/
 │   ├── base.py           # policy interface, fixed/random
@@ -638,8 +649,10 @@ ai-assignment-2/
 ├── tools/
 │   ├── prepare_traces.py # downloads + splits the public traces
 │   ├── make_scenarios.py # generates the stress-test scenarios (U4)
+│   ├── record_experiment.py # evaluates a run on all test sets → experiments/
 │   └── trace_logger.py   # records our own bandwidth traces on phone/laptop (U1)
 ├── tests/                # pytest suite
+├── experiments/          # recorded results of every training run (+ baselines), for final comparison
 └── report/               # two-column LaTeX (Overleaf) report
 ```
 

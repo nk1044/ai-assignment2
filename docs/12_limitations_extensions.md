@@ -9,7 +9,7 @@
 | One video (EnvivioDash3) | sizes/ladder are specific to one video | could train on many videos; the state already includes the real chunk sizes |
 | Linear QoE is a model of perception | real perception is non-linear | QoE_log / QoE_hd variants supported; VMAF-based reward is an extension |
 | Pre-filtered bandwidth range (≈ 0.2–6 Mbps) | very fast links are uninteresting for this ladder | the trace logger caps at 8 Mbps for the same reason |
-| First training run under-tuned (entropy) | only +3 % over RobustMPC | lower `--entropy-start`, train longer |
+| A2C runs under-tuned (entropy) | only +3 % over RobustMPC | PPO run with lower entropy, privileged critic, less noisy validation |
 | FCC test set is only 12 traces | high variance (± 1.8) | HSDPA (142) is the main benchmark |
 
 ## 12.2 Extensions and their status
@@ -20,15 +20,16 @@
 | U1 | Own Indian traces | ✅ tool + protocol; recordings still to do |
 | U2 | Data Saver (preference-conditioned on λ) | ✅ code (`--lambda-range`); needs a training run |
 | — | Offline-optimal upper bound | ✅ done |
+| — | Asymmetric (privileged) critic + PPO | ✅ code; A2C v1/v2 recorded as the symmetric control; PPO run pending |
 | U3 | Explainability: policy heatmap (buffer × throughput → chosen bitrate, vs BB/RB rules), permutation feature importance | planned (Part 6b) |
-| P4 | "Watch it learn" timelapse from `ckpt_*.pt` | planned (checkpoints already saved every 1000 iterations) |
+| P4 | "Watch it learn" timelapse from `ckpt_*.pt` | planned (checkpoints saved every 500 PPO iterations; A2C runs saved every 1000) |
 | P1–P3 | Web demo: side-by-side players, draw-your-network, human vs AI | planned (Part 6c) |
-| — | PPO / DQN comparison, LSTM policy, VMAF reward, live-streaming mode | ideas |
+| — | DQN comparison, LSTM policy, VMAF reward, live-streaming mode | ideas |
 
 ## 12.3 How the Data Saver works (U2)
 
 - Reward `r = q − μT − |Δq| − λ·MB`. A larger λ makes every megabyte cost QoE.
-- Training: `python train.py --run-name a2c_datasaver --lambda-range 0 2`. Each video samples
+- Training: `python train.py --run-name ppo_datasaver --lambda-range 0 2`. Each video samples
   λ ~ U(0, 2), and λ is fed as an extra input to both networks (a Linear(1→128) branch in the feature
   extractor).
 - The agent learns a *family* of policies indexed by λ. At test time a slider sets λ, and the same model

@@ -2,19 +2,19 @@
 
 from baselines.base import Policy
 
-from .a2c import A2CAgent
+from .ppo import PPOAgent
 
 
 class RLPolicy(Policy):
-    def __init__(self, agent, name="A2C", data_lambda=None, greedy=True):
+    def __init__(self, agent, name="PPO", data_lambda=None, greedy=True):
         self.agent = agent
         self.name = name
         self.data_lambda = data_lambda
         self.greedy = greedy
 
     @classmethod
-    def from_checkpoint(cls, path, name="A2C", **kw):
-        return cls(A2CAgent.load(path), name, **kw)
+    def from_checkpoint(cls, path, name="PPO", **kw):
+        return cls(PPOAgent.load(path), name, **kw)
 
     def select(self, state, env):
         extras = None
