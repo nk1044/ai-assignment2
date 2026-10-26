@@ -1,6 +1,7 @@
 # Adaptive Bitrate Streaming with Deep Reinforcement Learning
 
-**GitHub:** https://github.com/nk1044/ai-assignment2 · **Team:** Neeraj Kumar
+**GitHub:** https://github.com/nk1044/ai-assignment2
+**Team:** Neeraj Kumar (B23CS1044) · Abhyudaya Tiwari (B23CS1085)
 **Report:** [`report/report.tex`](report/report.tex): two-column LaTeX, 2 pages. Build it by uploading the
 `report/` folder to Overleaf, or locally with `cd report && pdflatex report.tex`.
 
