@@ -29,13 +29,13 @@
 
 ## 8.3 Results so far
 
-**HSDPA test (142 unseen traces), QoE_lin, first training run (A2C v1).** Every run, including PPO, is
-compared in `experiments/README.md`.
+**HSDPA test (142 unseen traces), QoE_lin.** Every run is compared in `experiments/README.md`.
 
 | Policy | QoE/chunk | Bitrate (Mbps) | Stall (s/video) | Switches | Startup (s) |
 |---|---|---|---|---|---|
 | Offline optimal | 1.145 | 1.18 | 0.01 | 2.4 | 1.70 |
-| **A2C (ours)** | **0.934** | 1.10 | **0.17** | 12.1 | 1.70 |
+| **PPO + asymmetric critic (final)** | **0.971** | 1.08 | 0.35 | **4.5** | 1.70 |
+| A2C v1 (earlier) | 0.934 | 1.10 | 0.17 | 12.1 | 1.70 |
 | RobustMPC | 0.907 | 1.13 | 0.91 | 9.5 | 4.06 |
 | BOLA | 0.771 | 0.94 | 0.01 | 13.8 | 1.70 |
 | RB | 0.745 | 0.92 | 1.13 | 6.5 | 4.06 |
@@ -43,11 +43,12 @@ compared in `experiments/README.md`.
 | FastMPC | 0.431 | 1.20 | 6.82 | 10.6 | 4.06 |
 
 How to read it:
-- A2C has the best QoE of all real algorithms. It gets almost RobustMPC's bitrate with **5× fewer stalls**.
+- PPO has the best QoE of all real algorithms (+7 % vs RobustMPC), with 2.6× less stall time and 2.1× fewer switches.
+- On FCC it scores 0.675 vs 0.604 (+12 %); on the stress tests 1.393 vs 0.738 (+89 %); in the metro tunnel 1.37 vs −1.79.
+- A2C v1 already beat RobustMPC (0.934), with fewer stalls but many switches.
 - It has learned to be cautious when it matters, without being as timid as BOLA.
-- It switches more than RobustMPC (12 vs 9.5). That is the next thing to improve.
-- It still sits 18 % below the optimum: room for better training (Ch. 07 §7.6).
-- A2C's startup is 1.70 s because it starts at 300 kbps. MPC/RB start at the 750k default → 4.06 s.
+- PPO still sits 15 % below the optimum. The time-series figure shows one remaining mistake: a high-bitrate request just as the link collapses.
+- The RL agents' startup is 1.70 s because they start at 300 kbps. MPC/RB start at the 750k default → 4.06 s.
 
 **Stress-test scenarios (baselines only so far):**
 

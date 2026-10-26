@@ -36,7 +36,7 @@ critic, and they are kept as an experiment history. It is compared against 5 cla
 dynamic-programming **offline optimal** that knows the future. On 142 unseen 3G traces:
 - the best classic algorithm (RobustMPC) scores 0.907 QoE per chunk;
 - the optimum scores 1.145;
-- the RL agent's job is to close that 21 % gap. A2C v1 already reached 0.934.
+- the final PPO agent scores **0.971**, closing 27 % of that gap. It beats every baseline on every test set.
 
 ## Key numbers to remember
 
@@ -50,4 +50,5 @@ dynamic-programming **offline optimal** that knows the future. On 142 unseen 3G 
 | Train / validation / test traces | 115 → 103 train + 12 val / 142 HSDPA + 12 FCC test |
 | Network size | actor ≈ 266 k parameters, privileged critic ≈ 348 k |
 | Training (PPO) | 10 000 rollouts × 16 videos, 4 epochs each, ≈ 1.05 h CPU (A2C: 30 000 updates ≈ 53 min) |
-| HSDPA test QoE | RobustMPC 0.907, A2C v1 0.934, A2C v2 0.924, optimum 1.145; PPO: see `experiments/README.md` |
+| HSDPA test QoE | **PPO 0.971** (+7 % vs RobustMPC 0.907), A2C v1 0.934, A2C v2 0.924, optimum 1.145 |
+| Stress tests / metro tunnel | PPO 1.393 / 1.37 vs RobustMPC 0.738 / −1.79 |

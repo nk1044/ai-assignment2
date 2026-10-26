@@ -127,7 +127,8 @@ efficient on one CPU.
 **Q: Does RL beat the baselines?**
 Yes. On 142 unseen 3G traces the first A2C agent scores 0.934 vs RobustMPC's 0.907, and it stalls 5× less
 (0.17 vs 0.91 s per video). It also wins on FCC (0.644 vs 0.604) and the scenarios (1.047 vs 0.738;
-metro tunnel +0.16 vs −1.79). PPO results are in `experiments/README.md`. It is still 18 % below the offline optimum (1.145).
+metro tunnel +0.16 vs −1.79). The final PPO agent is better still: 0.971 on HSDPA (+7 %), 0.675 on FCC (+12 %), 1.393 on the stress tests
+(+89 %), with 2.1× fewer quality switches than RobustMPC. It is still 18 % below the offline optimum (1.145).
 
 **Q: Why is the gain smaller than Pensieve's 12–25 %?**
 - Pensieve compared against MPC variants under its own setup.

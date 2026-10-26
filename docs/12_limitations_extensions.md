@@ -9,7 +9,7 @@
 | One video (EnvivioDash3) | sizes/ladder are specific to one video | could train on many videos; the state already includes the real chunk sizes |
 | Linear QoE is a model of perception | real perception is non-linear | QoE_log / QoE_hd variants supported; VMAF-based reward is an extension |
 | Pre-filtered bandwidth range (≈ 0.2–6 Mbps) | very fast links are uninteresting for this ladder | the trace logger caps at 8 Mbps for the same reason |
-| A2C runs under-tuned (entropy) | only +3 % over RobustMPC | PPO run with lower entropy, privileged critic, less noisy validation |
+| A2C runs under-tuned (entropy) | only +3 % over RobustMPC | fixed in the final PPO run (+7 %) |
 | FCC test set is only 12 traces | high variance (± 1.8) | HSDPA (142) is the main benchmark |
 
 ## 12.2 Extensions and their status
@@ -20,10 +20,10 @@
 | U1 | Own Indian traces | ✅ tool + protocol; recordings still to do |
 | U2 | Data Saver (preference-conditioned on λ) | ✅ code (`--lambda-range`); needs a training run |
 | — | Offline-optimal upper bound | ✅ done |
-| — | Asymmetric (privileged) critic + PPO | ✅ code; A2C v1/v2 recorded as the symmetric control; PPO run pending |
+| — | Asymmetric (privileged) critic + PPO | ✅ done: 0.971 HSDPA vs A2C 0.934 / RobustMPC 0.907 |
 | U3 | Explainability: policy heatmap (buffer × throughput → chosen bitrate, vs BB/RB rules), permutation feature importance | planned (Part 6b) |
 | P4 | "Watch it learn" timelapse from `ckpt_*.pt` | planned (checkpoints saved every 500 PPO iterations; A2C runs saved every 1000) |
-| P1–P3 | Web demo: side-by-side players, draw-your-network, human vs AI | planned (Part 6c) |
+| P1–P2 | Web demo: side-by-side players, draw-your-network | ✅ done (`python demo/server.py`) |
 | — | DQN comparison, LSTM policy, VMAF reward, live-streaming mode | ideas |
 
 ## 12.3 How the Data Saver works (U2)
