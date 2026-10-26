@@ -4,8 +4,7 @@
 
 ```
 ai-assignment-2/
-├── README.md                 project report-style overview (formulation, results, bonus plan)
-├── commands.md               every command: setup, train, evaluate, figures, demo
+├── README.md                 overview, results, formulation, installation and every command
 ├── requirements.txt          numpy, torch, matplotlib, pytest
 ├── pytest.ini                pythonpath = .  (so tests can import the packages)
 │
@@ -29,6 +28,12 @@ ai-assignment-2/
 │
 ├── train.py                  training loop: split validation, collect → update, validate, checkpoint
 ├── evaluate.py               runs any set of policies on a trace set, writes CSV logs + table
+│
+├── demo/
+│   ├── server.py             web demo server (stdlib http.server): simulates all players on a chosen/drawn network
+│   └── index.html            side-by-side players, timeline, draw-your-network (no external libraries)
+├── models/ppo_asym.pt        the trained PPO agent
+├── report/                   two-column LaTeX report (report.tex, figures/)
 │
 ├── plots/
 │   ├── style.py              fixed colour per algorithm, matplotlib style

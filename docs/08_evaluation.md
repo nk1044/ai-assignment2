@@ -79,5 +79,5 @@ not create git noise.
 | `g6_tradeoff_*` | average bitrate vs % time stalled | the quality–stall frontier |
 | `g7_scenarios` | per-scenario bandwidth sparkline + QoE bars | the tunnel story |
 
-To add the agent: run the three `evaluate.py --oracle --agent PPO=...` commands (`commands.md`), then
+To add the agent: run the three `evaluate.py --oracle --agent PPO=...` commands (README → Usage), then
 `make_figures.py`. Every chart picks up `PPO_traces.csv` (and `A2C_traces.csv`, if present) automatically.
