@@ -32,7 +32,7 @@ row 5  chunks remaining    [0 0 0 0 0 0 0  c_t / 48     ]      1 value
 | Throughput history | The only evidence about future bandwidth (trend, variance, recent drops) |
 | Download-time history | Complements throughput: a long download warns of trouble even when the throughput number looks OK, and it is informative about RTT-dominated small chunks |
 | Next chunk sizes | VBR: the same bitrate can be a big or small chunk depending on scene complexity; tells the real cost of each action |
-| Chunks remaining | Near the end, a large buffer is worthless (it never gets played), so the agent can spend it on quality |
+| Chunks remaining | Buffer is insurance for *future downloads*. With only a few chunks left to download, a large buffer protects against downloads that will never happen, so the agent can safely "spend" it on high-quality (slow) final chunks. Without this feature, chunk 10 and chunk 46 look identical and the agent stays conservative until the very end |
 
 **Normalisation.** Everything is roughly in [0, 5] so no input dominates the first layer:
 - bitrate is divided by the max bitrate;
