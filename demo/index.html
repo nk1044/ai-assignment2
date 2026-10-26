@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ABR Streaming Demo</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --ink: #141413; --ink-2: #5a5955; --line: #e4e3df;
+    --accent: #2a78d6; --bw-fill: #cde2fb; --bw-line: #256abf; --screen: #10151c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --surface: #1f1f1d; --ink: #f2f1ec; --ink-2: #b4b2a9; --line: #393936;
+            --accent: #3987e5; --bw-fill: #1c3a5e; --bw-line: #6da7ec; --screen: #0b0e12; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--ink-2); margin: 0 0 16px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+  label { color: var(--ink-2); font-size: 13px; }
+  select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+                   border-radius: 7px; padding: 6px 10px; }
+  select { max-width: 340px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 7px 18px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .tabs button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #drawWrap { display: none; margin-top: 12px; }
+  #drawWrap.on { display: block; }
+  #draw { width: 100%; height: 170px; display: block; border: 1px dashed var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; }
+  .hint { color: var(--ink-2); font-size: 12px; margin-top: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .player { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .player header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .tag { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--ink-2); }
+  .screen { position: relative; aspect-ratio: 16 / 9; background: var(--screen); }
+  .screen canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .badge { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px;
+           padding: 2px 7px; border-radius: 10px; }
+  .stall { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+           flex-direction: column; gap: 6px; background: rgba(0,0,0,.45); color: #fff; font-size: 12px; }
+  .stall.on { display: flex; }
+  .spinner { width: 30px; height: 30px; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff;
+             border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stats { padding: 8px 10px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; font-size: 12px; }
+  .stats b { display: block; font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .stats span { color: var(--ink-2); }
+  .bufbar { height: 6px; background: var(--line); margin: 0 10px; border-radius: 3px; overflow: hidden; }
+  .bufbar div { height: 100%; width: 0; }
+  #timeline { width: 100%; height: 200px; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-2); font-weight: 500; }
+  tr.best td { font-weight: 700; }
+  .clock { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  #err { color: #e34948; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Adaptive bitrate streaming: RL vs classic players</h1>
+  <p class="sub">Every player streams the same 48-chunk video over the same network. Sharpness = chosen bitrate,
+    spinner = stall. The PPO agent was trained with reinforcement learning on real network traces.</p>
+
+  <section class="panel">
+    <div class="controls">
+      <div class="tabs"><button id="tabTrace" class="on">Real / stress-test network</button>
+        <button id="tabDraw">Draw your own network</button></div>
+      <select id="trace" aria-label="network trace"></select>
+      <label><input type="checkbox" id="oracle" checked> show offline optimal (knows the future)</label>
+      <label>speed <select id="speed"><option>4</option><option selected>8</option><option>16</option><option>32</option></select>×</label>
+      <button id="run" class="primary">▶ Stream</button>
+      <span class="clock" id="clock"></span>
+      <span id="err"></span>
+    </div>
+    <div id="drawWrap">
+      <canvas id="draw"></canvas>
+      <div class="controls" style="margin-top:8px">
+        <span class="hint">Drag to draw bandwidth (0–6 Mbps) over 240 s. Presets:</span>
+        <button data-preset="steady">Steady 2 Mbps</button>
+        <button data-preset="tunnel">Metro tunnel</button>
+        <button data-preset="crash">Crash at 60 s</button>
+        <button data-preset="wifi">Flaky Wi-Fi</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid" id="players"></section>
+
+  <section class="panel" style="margin-top:14px">
+    <canvas id="timeline"></canvas>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="panel" id="summary" hidden>
+    <table><thead><tr><th>Player</th><th>QoE / chunk</th><th>Avg bitrate (Mbps)</th><th>Stall (s)</th>
+      <th>Switches</th><th>Startup (s)</th></tr></thead><tbody></tbody></table>
+  </section>
+</main>
+<script>
+const COLORS = {"PPO": "#2a78d6", "RobustMPC": "#eb6834", "BOLA": "#1baf7a", "BB": "#e87ba4", "Offline optimal": "#8a8984"};
+const TAGS = {"PPO": "RL agent", "RobustMPC": "model-predictive", "BOLA": "buffer-based", "BB": "buffer-based",
+              "Offline optimal": "knows the future"};
+const RES = {300: [24, "240p"], 750: [44, "360p"], 1200: [70, "480p"], 1850: [110, "720p"], 2850: [170, "1080p"], 4300: [256, "1440p"]};
+const DRAW_S = 240, DRAW_MAX = 6;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id => document.getElementById(id);
+let mode = "trace", drawn = new Array(DRAW_S).fill(2.0), session = null, raf = null;
+
+// ---------------------------------------------------------------- trace list
+fetch("/api/traces").then(r => r.json()).then(cat => {
+  for (const [group, items] of Object.entries(cat)) {
+    const og = document.createElement("optgroup"); og.label = group;
+    for (const id of items) { const o = document.createElement("option"); o.value = id; o.textContent = id.split("::")[1]; og.appendChild(o); }
+    $("trace").appendChild(og);
+  }
+  const q = new URLSearchParams(location.search);
+  $("trace").value = q.get("trace") || "scenarios::metro_tunnel_0";
+  if (q.get("speed")) $("speed").value = q.get("speed");
+  if (q.get("oracle") === "0") $("oracle").checked = false;
+  if (q.get("draw")) { setMode("draw"); document.querySelector(`[data-preset="${q.get("draw")}"]`)?.click(); }
+  if (q.get("autoplay")) $("run").click();
+});
+
+// ---------------------------------------------------------------- draw-your-network
+const dc = $("draw");
+function sizeCanvas(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio || 1;
+  c.width = Math.round(r.width * d); c.height = Math.round(r.height * d); const g = c.getContext("2d"); g.setTransform(d, 0, 0, d, 0, 0); return [g, r.width, r.height]; }
+function renderDraw() {
+  const [g, w, h] = sizeCanvas(dc);
+  g.clearRect(0, 0, w, h);
+  g.strokeStyle = css("--line"); g.fillStyle = css("--ink-2"); g.font = "11px sans-serif"; g.lineWidth = 1;
+  for (let m = 0; m <= DRAW_MAX; m += 2) { const y = h - 18 - (m / DRAW_MAX) * (h - 28);
+    g.beginPath(); g.moveTo(30, y); g.lineTo(w, y); g.stroke(); g.fillText(m + "M", 2, y + 4); }
+  for (const [kbps] of Object.entries(RES)) { const y = h - 18 - (kbps / 1000 / DRAW_MAX) * (h - 28);
+    g.setLineDash([2, 3]); g.beginPath(); g.moveTo(30, y); g.lineTo(w, y); g.stroke(); g.setLineDash([]); }
+  for (let s = 0; s <= DRAW_S; s += 60) g.fillText(s + "s", 30 + (s / DRAW_S) * (w - 34), h - 4);
+  g.beginPath(); g.moveTo(30, h - 18);
+  drawn.forEach((v, i) => g.lineTo(30 + (i / DRAW_S) * (w - 34), h - 18 - (v / DRAW_MAX) * (h - 28)));
+  g.lineTo(w - 4, h - 18); g.closePath(); g.fillStyle = css("--bw-fill"); g.fill(); g.strokeStyle = css("--bw-line"); g.lineWidth = 2; g.stroke();
+}
+let last = null;
+function paint(e) {
+  const r = dc.getBoundingClientRect();
+  const i = Math.max(0, Math.min(DRAW_S - 1, Math.round(((e.clientX - r.left - 30) / (r.width - 34)) * DRAW_S)));
+  const v = Math.max(0, Math.min(DRAW_MAX, (1 - (e.clientY - r.top - 10) / (r.height - 28)) * DRAW_MAX));
+  if (last) { const [i0, v0] = last, n = Math.abs(i - i0);
+    for (let k = 0; k <= n; k++) drawn[i0 + Math.sign(i - i0) * k] = v0 + (v - v0) * (n ? k / n : 1); }
+  else drawn[i] = v;
+  last = [i, v]; renderDraw();
+}
+dc.addEventListener("pointerdown", e => { last = null; dc.setPointerCapture(e.pointerId); paint(e); });
+dc.addEventListener("pointermove", e => { if (e.buttons) paint(e); });
+dc.addEventListener("pointerup", () => { last = null; });
+document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
+  const p = b.dataset.preset;
+  drawn = drawn.map((_, i) => p === "steady" ? 2 : p === "tunnel" ? ((i % 70) > 45 ? 0 : 3)
+                       : p === "crash" ? (i < 60 ? 3.5 : 0.35) : ((Math.floor(i / 4) % 2) ? 0.5 : 4));
+  renderDraw();
+});
+function setMode(m) { mode = m; $("tabTrace").classList.toggle("on", m === "trace"); $("tabDraw").classList.toggle("on", m === "draw");
+  $("drawWrap").classList.toggle("on", m === "draw"); $("trace").disabled = m === "draw"; if (m === "draw") renderDraw(); }
+$("tabTrace").onclick = () => setMode("trace"); $("tabDraw").onclick = () => setMode("draw");
+
+// ---------------------------------------------------------------- playback model
+function prepare(p, L, N) {
+  const rows = p.rows, D = rows.map(r => r.wall_time_s - r.sleep_s);          // download end times
+  const start = D[0];                                                           // playback starts after chunk 0
+  const stalls = rows.slice(1).map((r, k) => [D[k + 1] - r.rebuffer_s, D[k + 1]]).filter(([a, b]) => b > a + 1e-6);
+  const end = start + stalls.reduce((s, [a, b]) => s + b - a, 0) + N * L;
+  return {...p, D, start, stalls, end, L, N};
+}
+function at(pl, t) {
+  if (t < pl.start) return {played: 0, stalled: true, startup: true};
+  let stalled = false, lost = 0;
+  for (const [a, b] of pl.stalls) { if (t >= b) lost += b - a; else if (t > a) { lost += t - a; stalled = true; } }
+  const played = Math.min(pl.N * pl.L, t - pl.start - lost);
+  const got = pl.D.filter(d => d <= t).length;
+  const chunk = Math.min(pl.N - 1, Math.floor(played / pl.L));
+  const done = pl.rows.filter((r, k) => k > 0 && pl.D[k] <= t);
+  return {played, stalled, buffer: Math.max(0, got * pl.L - played), chunk, kbps: pl.rows[chunk].bitrate_kbps,
+          qoe: done.length ? done.reduce((s, r) => s + r.reward, 0) / done.length : null,
+          stallTime: pl.stalls.reduce((s, [a, b]) => s + Math.max(0, Math.min(t, b) - a), 0),
+          switches: pl.rows.slice(0, chunk + 1).reduce((s, r, k, a) => s + (k && r.bitrate_kbps !== a[k - 1].bitrate_kbps), 0),
+          finished: played >= pl.N * pl.L};
+}
+
+// ---------------------------------------------------------------- video "screen"
+function drawScene(g, w, h, t) {
+  const sky = g.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, "#2b6cb0"); sky.addColorStop(1, "#f6ad55");
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#fde68a"; g.beginPath(); g.arc(w * 0.8, h * 0.3, h * 0.12, 0, 7); g.fill();
+  g.fillStyle = "#2f855a";
+  g.beginPath(); g.moveTo(0, h);
+  for (let x = 0; x <= w; x += w / 24) g.lineTo(x, h * 0.62 + Math.sin(x / w * 9 + t * 0.15) * h * 0.08);
+  g.lineTo(w, h); g.fill();
+  g.fillStyle = "#1a202c"; g.fillRect(0, h * 0.82, w, h * 0.18);
+  const cx = ((t * 0.09) % 1.3 - 0.15) * w;
+  g.fillStyle = "#e53e3e"; g.fillRect(cx, h * 0.72, w * 0.16, h * 0.1);
+  g.fillStyle = "#fff"; g.fillRect(cx + w * 0.11, h * 0.74, w * 0.035, h * 0.04);
+  g.fillStyle = "#111"; g.beginPath(); g.arc(cx + w * 0.035, h * 0.83, h * 0.03, 0, 7); g.arc(cx + w * 0.125, h * 0.83, h * 0.03, 0, 7); g.fill();
+  for (let i = 0; i < 6; i++) { g.fillStyle = "#edf2f7";
+    g.fillRect(((i / 6 + t * 0.05) % 1) * w, h * 0.87, w * 0.06, h * 0.015); }
+}
+const off = document.createElement("canvas");
+function renderScreen(c, kbps, played) {
+  const [px] = RES[kbps], w = px, h = Math.round(px * 9 / 16);
+  off.width = w; off.height = h; drawScene(off.getContext("2d"), w, h, played);
+  if (c.width !== 512) { c.width = 512; c.height = 288; }
+  const g = c.getContext("2d"); g.imageSmoothingEnabled = kbps >= 1850; g.drawImage(off, 0, 0, c.width, c.height);
+}
+
+// ---------------------------------------------------------------- UI build + animation
+function build(data) {
+  const L = data.chunk_len_s, N = data.n_chunks;
+  session = {data, players: data.players.map(p => prepare(p, L, N)), t: 0, last: null};
+  session.T = Math.max(...session.players.map(p => p.end)) + 1;
+  $("players").innerHTML = ""; $("legend").innerHTML = '<span><i style="background:' + css("--bw-line") + '"></i>bandwidth</span>';
+  for (const p of session.players) {
+    const col = COLORS[p.name] || "#888";
+    const el = document.createElement("article"); el.className = "player";
+    el.innerHTML = `<header><span class="dot" style="background:${col}"></span>${p.name}<span class="tag">${TAGS[p.name] || ""}</span></header>
+      <div class="screen"><canvas></canvas><span class="badge"></span><div class="stall"><div class="spinner"></div><span></span></div></div>
+      <div class="stats"><div><b class="q">–</b><span>QoE / chunk</span></div><div><b class="s">0.0 s</b><span>stalled</span></div><div><b class="w">0</b><span>switches</span></div></div>
+      <div class="bufbar" title="buffer (0–60 s)"><div style="background:${col}"></div></div><div style="height:10px"></div>`;
+    $("players").appendChild(el); p.el = el;
+    $("legend").insertAdjacentHTML("beforeend", `<span><i style="background:${col}"></i>${p.name} bitrate</span>`);
+  }
+  $("summary").hidden = true;
+}
+function frame(now) {
+  const s = session, speed = +$("speed").value;
+  if (s.last !== null) s.t = Math.min(s.T, s.t + (now - s.last) / 1000 * speed);
+  s.last = now;
+  for (const p of s.players) {
+    const st = at(p, s.t), el = p.el;
+    renderScreen(el.querySelector("canvas"), st.startup ? 300 : st.kbps, st.played);
+    el.querySelector(".badge").textContent = st.startup ? "starting…" : `${RES[st.kbps][1]} · ${(st.kbps / 1000).toFixed(2)} Mbps`;
+    const ov = el.querySelector(".stall"); ov.classList.toggle("on", st.stalled && !st.finished);
+    ov.querySelector("span").textContent = st.startup ? "Starting…" : "Buffering…";
+    el.querySelector(".q").textContent = st.qoe === null || st.qoe === undefined ? "–" : st.qoe.toFixed(2);
+    el.querySelector(".s").textContent = (st.stallTime || 0).toFixed(1) + " s";
+    el.querySelector(".w").textContent = st.switches || 0;
+    el.querySelector(".bufbar div").style.width = Math.min(100, (st.buffer || 0) / 60 * 100) + "%";
+  }
+  drawTimeline(s.t);
+  $("clock").textContent = `t = ${s.t.toFixed(0)} s / ${s.T.toFixed(0)} s`;
+  if (s.t < s.T) raf = requestAnimationFrame(frame); else finish();
+}
+function drawTimeline(t) {
+  const c = $("timeline"), [g, w, h] = sizeCanvas(c), s = session, bw = s.data.bandwidth;
+  const T = s.T, ymax = Math.max(5, ...bw.mbps.filter((_, i) => bw.t[i] <= T)) * 1.05;
+  const X = x => 36 + x / T * (w - 44), Y = y => h - 20 - y / ymax * (h - 30);
+  g.clearRect(0, 0, w, h); g.font = "11px sans-serif"; g.fillStyle = css("--ink-2"); g.strokeStyle = css("--line"); g.lineWidth = 1;
+  for (let m = 0; m <= ymax; m += Math.ceil(ymax / 4)) { g.beginPath(); g.moveTo(36, Y(m)); g.lineTo(w, Y(m)); g.stroke(); g.fillText(m + "M", 4, Y(m) + 4); }
+  for (let x = 0; x <= T; x += 30) g.fillText(x + "s", X(x) - 8, h - 4);
+  g.beginPath(); g.moveTo(X(0), Y(0)); let prev = 0;
+  bw.t.forEach((x, i) => { if (x - 1 > T) return; g.lineTo(X(prev), Y(bw.mbps[i])); g.lineTo(X(Math.min(x, T)), Y(bw.mbps[i])); prev = x; });
+  g.lineTo(X(Math.min(prev, T)), Y(0)); g.closePath(); g.fillStyle = css("--bw-fill"); g.fill();
+  for (const p of s.players) {
+    g.strokeStyle = COLORS[p.name] || "#888"; g.lineWidth = 2; g.setLineDash(p.name === "Offline optimal" ? [5, 4] : []);
+    g.beginPath();
+    p.rows.forEach((r, k) => { const a = k ? p.D[k - 1] + p.rows[k - 1].sleep_s : 0, b = p.D[k];
+      if (a > t) return; const y = Y(r.bitrate_kbps / 1000); k ? g.lineTo(X(a), y) : g.moveTo(X(a), y); g.lineTo(X(Math.min(b, t)), y); });
+    g.stroke();
+  }
+  g.setLineDash([]); g.strokeStyle = css("--ink"); g.lineWidth = 1; g.beginPath(); g.moveTo(X(t), 6); g.lineTo(X(t), h - 20); g.stroke();
+}
+function finish() {
+  const rows = session.players.map(p => [p.name, p.summary]);
+  const best = Math.max(...rows.filter(([n]) => n !== "Offline optimal").map(([, s]) => s.qoe));
+  $("summary").querySelector("tbody").innerHTML = rows.map(([n, s]) =>
+    `<tr class="${s.qoe === best && n !== "Offline optimal" ? "best" : ""}"><td><span class="dot" style="display:inline-block;margin-right:6px;background:${COLORS[n]}"></span>${n}</td>
+     <td>${s.qoe.toFixed(3)}</td><td>${s.bitrate_mbps.toFixed(2)}</td><td>${s.rebuffer_s.toFixed(1)}</td><td>${s.switches}</td><td>${s.startup_s.toFixed(1)}</td></tr>`).join("");
+  $("summary").hidden = false; $("run").disabled = false;
+}
+$("run").onclick = async () => {
+  cancelAnimationFrame(raf); $("run").disabled = true; $("err").textContent = ""; $("clock").textContent = "simulating…";
+  const body = mode === "draw" ? {bandwidth: drawn, oracle: $("oracle").checked} : {trace: $("trace").value, oracle: $("oracle").checked};
+  try {
+    const r = await fetch("/api/simulate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || r.statusText);
+    build(data); raf = requestAnimationFrame(frame);
+  } catch (e) { $("err").textContent = e.message; $("run").disabled = false; $("clock").textContent = ""; }
+};
+addEventListener("resize", () => { if (mode === "draw") renderDraw(); if (session) drawTimeline(session.t); });
+</script>
+</body>
+</html>
