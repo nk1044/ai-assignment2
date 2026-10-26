@@ -1,7 +1,8 @@
 # Adaptive Bitrate Streaming with Deep Reinforcement Learning
 
 **GitHub:** https://github.com/nk1044/ai-assignment2 · **Team:** Neeraj Kumar
-**Report:** [`report/report.tex`](report/report.tex) (two-column LaTeX, compiled PDF: `report/report.pdf`)
+**Report:** [`report/report.tex`](report/report.tex): two-column LaTeX, 2 pages. Build it by uploading the
+`report/` folder to Overleaf, or locally with `cd report && pdflatex report.tex`.
 
 A video player must choose, for every 4-second chunk, one of six qualities while the network bandwidth
 fluctuates. If the quality is too high the buffer drains and the video **stalls**. If it is too low the
