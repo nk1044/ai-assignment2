@@ -283,33 +283,89 @@ def fig_scenarios(res, out_dir, policies=("Oracle", "PPO", "RobustMPC", "BOLA", 
 
 
 # --------------------------------------------------------------------------- G1
-def fig_training(run_dir, out_dir, baselines=None):
-    log = Path(run_dir) / "log.csv"
-    if not log.exists():
-        print(f"  skip g1_training: {log} not found (train first)")
+RUN_STYLE = {"PPO_asym": ("PPO, asymmetric critic", color("PPO"), "-"),
+             "A2C_v1": ("A2C v1 (β 1.0→0.05)", color("A2C"), "-"),
+             "A2C_v2": ("A2C v2 (β 0.2→0.05)", color("A2C"), "--")}
+
+
+def fig_training(exp_dir, out_dir):
+    """Left: PPO validation QoE. Right: policy entropy of every recorded run vs wall-clock time."""
+    logs = {name: read_csv(Path(exp_dir) / name / "train_log.csv") for name in RUN_STYLE
+            if (Path(exp_dir) / name / "train_log.csv").exists()}
+    if "PPO_asym" not in logs:
+        print("  skip g1_training: experiments/PPO_asym/train_log.csv not found")
         return
-    rows = read_csv(log)
-    it = [r["iter"] for r in rows]
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.8))
-    axes[0].plot(it, [r["val_qoe"] for r in rows], color=color("PPO"), label="PPO (validation)")
-    for p, v in (baselines or {}).items():
-        axes[0].axhline(v, color=color(p), linestyle="--" if p == "Oracle" else ":", linewidth=1.2, label=label(p))
-    axes[0].set_xlabel("Training iteration")
-    axes[0].set_ylabel("Mean QoE per chunk")
-    axes[0].set_title("Learning curve")
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.7))
+    ppo = logs["PPO_asym"]
+    q = np.array([r["val_qoe"] for r in ppo])
+    smooth = np.convolve(q, np.ones(5) / 5, mode="valid")
+    it = [r["iter"] for r in ppo]
+    axes[0].plot(it, q, color=style.SEQ_BLUE[1], linewidth=0.9, label="validation QoE")
+    axes[0].plot(it[4:], smooth, color=color("PPO"), label="5-point mean")
+    best = max(ppo, key=lambda r: r["val_qoe"])
+    axes[0].scatter([best["iter"]], [best["val_qoe"]], s=30, color=INK, zorder=3)
+    axes[0].annotate("best.pt", (best["iter"], best["val_qoe"]), textcoords="offset points", xytext=(-8, 6),
+                     ha="right", fontsize=7.5, color=INK)
+    axes[0].set_xlabel("PPO iteration (16 videos each)")
+    axes[0].set_ylabel("Validation QoE per chunk")
+    axes[0].set_title("PPO learning curve")
     axes[0].legend(loc="lower right")
-    axes[1].plot(it, [r["entropy"] for r in rows], color=INK_2)
-    axes[1].set_xlabel("Training iteration")
+    for name, rows in logs.items():
+        lab, col, ls = RUN_STYLE[name]
+        axes[1].plot([r["time_s"] / 60 for r in rows], [r["entropy"] for r in rows], color=col, linestyle=ls,
+                     label=lab)
+    axes[1].axhline(np.log(6), color=INK_2, linewidth=0.6, linestyle=":")
+    axes[1].text(1, np.log(6) + 0.03, "uniform policy (ln 6)", fontsize=7, color=INK_2)
+    axes[1].set_xlabel("Training time (min)")
     axes[1].set_ylabel("Policy entropy (nats)")
-    axes[1].set_title("Exploration decays")
+    axes[1].set_title("Exploration over training")
+    axes[1].set_ylim(0, 2.0)
+    axes[1].legend(loc="lower left", fontsize=7)
     fig.tight_layout()
     save(fig, out_dir, "g1_training")
+
+
+def fig_runs(exp_dir, out_dir):
+    """Test QoE of every recorded RL run next to the best baseline and the optimum."""
+    exp_dir = Path(exp_dir)
+    if not (exp_dir / "results.csv").exists():
+        print("  skip g8_runs: experiments/results.csv not found")
+        return
+    rows = {r["name"]: r for r in read_csv(exp_dir / "baselines.csv")}
+    rows |= {r["name"]: r for r in read_csv(exp_dir / "results.csv")}
+    order = [n for n in ("RobustMPC", "A2C_v1", "A2C_v2", "PPO_asym", "Oracle") if n in rows]
+    names = {"RobustMPC": "RobustMPC (best heuristic)", "A2C_v1": "A2C v1", "A2C_v2": "A2C v2",
+             "PPO_asym": "PPO + asymmetric critic", "Oracle": "Offline optimal"}
+    cols = {"RobustMPC": color("RobustMPC"), "A2C_v1": color("A2C"), "A2C_v2": color("A2C"),
+            "PPO_asym": color("PPO"), "Oracle": color("Oracle")}
+    sets = [("hsdpa_qoe", "HSDPA 3G\n(142)"), ("fcc_qoe", "FCC\n(12)"), ("scenarios_qoe", "Stress tests\n(30)"),
+            ("sc_metro_tunnel", "Metro tunnel\n(6)")]
+    fig, ax = plt.subplots(figsize=(7.0, 2.8))
+    width = 0.8 / len(order)
+    for i, n in enumerate(order):
+        x = np.arange(len(sets)) + (i - (len(order) - 1) / 2) * width
+        vals = [rows[n][k] for k, _ in sets]
+        ax.bar(x, vals, width=width * 0.92, color="none" if n in ("Oracle", "A2C_v2") else cols[n],
+               edgecolor=cols[n], hatch="////" if n in ("Oracle", "A2C_v2") else None, linewidth=1.0,
+               label=names[n])
+        for xi, v in zip(x, vals):
+            ax.text(xi, v + (0.04 if v >= 0 else -0.04), f"{v:.2f}", ha="center", va="bottom" if v >= 0 else "top",
+                    fontsize=5.8, color=INK, rotation=90)
+    ax.axhline(0, color=INK_2, linewidth=0.6)
+    ax.set_xticks(np.arange(len(sets)), [s for _, s in sets])
+    ax.set_ylabel("Mean QoE per chunk")
+    ax.set_title("Test QoE of each method")
+    ax.grid(axis="x", visible=False)
+    ax.set_ylim(-2.4, 2.9)
+    ax.legend(ncol=3, loc="upper center", fontsize=7)
+    fig.tight_layout()
+    save(fig, out_dir, "g8_runs")
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--results", default=str(ROOT / "results" / "baselines"))
-    p.add_argument("--run", default=str(ROOT / "runs" / "ppo_asym"), help="training run for the learning curve")
+    p.add_argument("--experiments", default=str(ROOT / "experiments"), help="recorded runs (learning curves)")
     p.add_argument("--out", default=str(ROOT / "plots" / "figures"))
     args = p.parse_args()
 
@@ -336,9 +392,8 @@ def main():
         print("  skip g7_scenarios: run `python evaluate.py --traces scenarios --oracle`")
     if "hsdpa/test" in results:
         fig_timeseries(results["hsdpa/test"], "hsdpa/test", out)
-        ref = {pol: np.mean([t["qoe"] for t in results["hsdpa/test"][pol]["traces"]])
-               for pol in ("RobustMPC", "Oracle") if pol in results["hsdpa/test"]}
-        fig_training(args.run, out, ref)
+    fig_training(args.experiments, out)
+    fig_runs(args.experiments, out)
 
 
 if __name__ == "__main__":
