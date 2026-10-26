@@ -27,7 +27,7 @@
 \renewcommand\subsection{\@startsection{subsection}{2}{\z@}{-0.6ex}{0.2ex}{\normalfont\small\bfseries}}
 \makeatother
 
-\title{\vspace{-1.6em}\textbf{Adaptive Bitrate Streaming with PPO and an Asymmetric Critic}\vspace{-0.6em}}
+\title{\vspace{-1.6em}\Large\textbf{Adaptive Bitrate Streaming with PPO and an Asymmetric Critic}\vspace{-0.6em}}
 \author{Neeraj Kumar (B23CS1044) \quad\textbar\quad Abhyudaya Tiwari (B23CS1085)\\[2pt]
   GitHub: \url{https://github.com/nk1044/ai-assignment2}\vspace{-1.2em}}
 \date{}
@@ -48,6 +48,32 @@ Decisions have delayed consequences: buffer saved now prevents a stall tens of s
 therefore a sequential decision problem under uncertainty, which we solve with reinforcement learning.
 Classic heuristics (rate-, buffer- and model-predictive control) appear only as baselines.
 
+\begin{table*}[t]
+\centering\footnotesize
+\caption{Mean QoE per chunk on unseen test traces (higher is better): HSDPA 3G (142 traces), FCC broadband
+(12) and stress tests (30; 5 generated scenarios $\times$ 6 variants, of which 6 are metro tunnels).
+$\Delta$ is relative to RobustMPC on HSDPA. Stall time (s) and quality switches are per video on HSDPA.}
+\label{tab:results}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccccccc}
+\toprule
+Method & HSDPA & $\Delta$ vs.\ RobustMPC & Stall [s] & Switches & FCC & Stress tests & Metro tunnel\\
+\midrule
+\textit{Offline optimal (knows the future)} & \textit{1.145} & \textit{+26\,\%} & 0.01 & 2.4 & \textit{0.819} & \textit{1.716} & \textit{2.11}\\
+\midrule
+\textbf{PPO, asymmetric critic (final)} & \textbf{0.971} & \textbf{+7\,\%} & 0.35 & \textbf{4.5} & \textbf{0.675} & \textbf{1.393} & \textbf{1.37}\\
+A2C v1, symmetric critic & 0.934 & +3\,\% & 0.17 & 12.1 & 0.644 & 1.047 & 0.16\\
+A2C v2, symmetric critic & 0.924 & +2\,\% & 0.35 & 11.5 & 0.645 & 0.926 & $-$0.50\\
+\midrule
+RobustMPC & 0.907 & -- & 0.91 & 9.5 & 0.604 & 0.738 & $-$1.79\\
+BOLA & 0.770 & $-$15\,\% & 0.01 & 13.8 & 0.396 & 1.113 & 1.27\\
+RB (rate-based) & 0.745 & $-$18\,\% & 1.13 & 6.5 & 0.428 & 1.042 & 0.37\\
+BB (buffer-based) & 0.626 & $-$31\,\% & 1.80 & 25.3 & 0.344 & 0.602 & $-$1.12\\
+FastMPC & 0.431 & $-$52\,\% & 6.82 & 10.6 & 0.252 & 0.330 & $-$3.24\\
+\bottomrule
+\end{tabular}
+\end{table*}
+
 \section{RL Formulation}
 \textbf{Step} $=$ one chunk decision; \textbf{episode} $=$ one video of $N{=}48$ chunks (3.2\,min)
 streamed over one bandwidth trace; $\gamma=0.99$.
@@ -67,9 +93,9 @@ of the EnvivioDash3 reference video.
 
 \textbf{Reward} (QoE$_{\text{lin}}$, as used by MPC and Pensieve):
 \begin{equation}
-r_t = q(R_t) - \mu\,T_t - \lvert q(R_t)-q(R_{t-1})\rvert ,\quad q(R)=R\ [\text{Mbps}],\ \mu=4.3,
+r_t = q(R_t) - \mu\,T_t - \lvert q(R_t)-q(R_{t-1})\rvert ,
 \end{equation}
-where $T_t$ is the stall time (s) caused by chunk $t$. Setting $\mu$ equal to the top bitrate makes 1\,s of
+where $q(R)=R$ in Mbps, $\mu=4.3$ and $T_t$ is the stall time (s) caused by chunk $t$. Setting $\mu$ equal to the top bitrate makes 1\,s of
 stall cost as much as a top-quality chunk earns, so stalling is never worth it. The smoothness term
 penalises jumps in proportion to their size. Summed over an episode, the reward equals the evaluation
 metric exactly.
@@ -101,7 +127,7 @@ sees identical networks.
   \node[box, fill=gray!8] (ppo) at (0,-1.55) {PPO update\\GAE, clip $\epsilon{=}0.2$};
   \draw[->] ([yshift=2mm]sim.east) -- node[above]{$s_t$ (6$\times$8)} ([yshift=2mm]actor.west);
   \draw[->] ([yshift=-2mm]actor.west) -- node[below]{$a_t$ \;/\; $r_t$} ([yshift=-2mm]sim.east);
-  \draw[->, dashed, priv, thick] (sim.south east) -- node[pos=0.55, sloped, above, text=black]{future bw $f_t$} (critic.north west);
+  \draw[->, dashed, priv, thick] (sim.south east) -- node[pos=0.62, sloped, below, text=black]{future bw $f_t$} (critic.north west);
   \draw[->] (critic.west) -- node[below]{advantages $\hat A_t$} (ppo.east);
   \draw[->, rounded corners] (ppo.south) -- ++(0,-2.5mm) -| node[pos=0.25, below]{update $\theta,\phi$}
         ([xshift=4mm]actor.east) -- (actor.east);
@@ -159,34 +185,10 @@ algorithm change.
     across bin sizes.
 \end{itemize}
 
-\begin{table*}[t]
-\centering\footnotesize
-\caption{Mean QoE per chunk on unseen test traces (higher is better): HSDPA 3G (142 traces), FCC broadband
-(12) and stress tests (30; 5 generated scenarios $\times$ 6 variants, of which 6 are metro tunnels).
-$\Delta$ is relative to RobustMPC on HSDPA. Stall time (s) and quality switches are per video on HSDPA.}
-\label{tab:results}
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{lccccccc}
-\toprule
-Method & HSDPA & $\Delta$ vs.\ RobustMPC & Stall [s] & Switches & FCC & Stress tests & Metro tunnel\\
-\midrule
-\textit{Offline optimal (knows the future)} & \textit{1.145} & \textit{+26\,\%} & 0.01 & 2.4 & \textit{0.819} & \textit{1.716} & \textit{2.11}\\
-\midrule
-\textbf{PPO, asymmetric critic (final)} & \textbf{0.971} & \textbf{+7\,\%} & 0.35 & \textbf{4.5} & \textbf{0.675} & \textbf{1.393} & \textbf{1.37}\\
-A2C v1, symmetric critic & 0.934 & +3\,\% & 0.17 & 12.1 & 0.644 & 1.047 & 0.16\\
-A2C v2, symmetric critic & 0.924 & +2\,\% & 0.35 & 11.5 & 0.645 & 0.926 & $-$0.50\\
-\midrule
-RobustMPC & 0.907 & -- & 0.91 & 9.5 & 0.604 & 0.738 & $-$1.79\\
-BOLA & 0.770 & $-$15\,\% & 0.01 & 13.8 & 0.396 & 1.113 & 1.27\\
-RB (rate-based) & 0.745 & $-$18\,\% & 1.13 & 6.5 & 0.428 & 1.042 & 0.37\\
-BB (buffer-based) & 0.626 & $-$31\,\% & 1.80 & 25.3 & 0.344 & 0.602 & $-$1.12\\
-FastMPC & 0.431 & $-$52\,\% & 6.82 & 10.6 & 0.252 & 0.330 & $-$3.24\\
-\bottomrule
-\end{tabular}
-\end{table*}
+
 
 \section{Results}
-Table~\ref{tab:results} and Fig.~\ref{fig:runs} compare all methods.
+Table~\ref{tab:results} compares all methods.
 
 \textbf{PPO beats every baseline on every test set.} Against RobustMPC, the strongest heuristic:
 \begin{itemize}
@@ -211,16 +213,11 @@ remaining weakness: PPO requests one high-bitrate chunk just as the link degrade
     steadily and gives the best policy on all test sets.
 \end{itemize}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{g8_runs.pdf}
-\caption{Test QoE of the best heuristic, the RL agents and the offline optimum.}
-\label{fig:runs}
-\end{figure}
+
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.78\columnwidth]{g5_timeseries_hsdpa_test.pdf}
+\includegraphics[width=0.72\columnwidth]{g5_timeseries_hsdpa_test.pdf}
 \caption{One HSDPA test video. Top: bandwidth. Middle: chosen bitrate. Bottom: buffer (\(\blacktriangledown\) = stall).}
 \label{fig:ts}
 \end{figure}
